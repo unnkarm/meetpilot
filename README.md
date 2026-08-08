@@ -38,19 +38,18 @@
 | 💻 **GitHub Repository** | Production-ready, verified open-source repository | **[🐙 GitHub: MeetPilot AI](https://github.com/YOUR_USERNAME/meetpilot)** |
 | 📖 **Interactive API Docs** | Live OpenAPI 3.0 / Swagger Interactive Documentation | **`http://localhost:8000/docs`** |
 
-
 ---
 
 ## 📖 Table of Contents
 
 1. [Executive Summary & Vision](#-executive-summary--vision)
 2. [The Problem Statement & Real-World Impact](#-the-problem-statement--real-world-impact)
-3. [The MeetPilot AI Solution](#-the-meetpilot-ai-solution)
+3. [The MeetPilot AI Solution Flowchart](#-the-meetpilot-ai-solution-flowchart)
 4. [Deep-Dive Feature Breakdown](#-deep-dive-feature-breakdown)
 5. [Competitive Advantage & Innovation Matrix](#-competitive-advantage--innovation-matrix)
 6. [Alignment with IEMHACKS 4.0 Judging Criteria](#-alignment-with-iemhacks-40-judging-criteria)
 7. [Cross-Theme Applications (Ed-Tech, Healthcare, Open Innovation)](#-cross-theme-applications)
-8. [System Architecture & Data Flow](#-system-architecture--data-flow)
+8. [System Architecture Diagram](#-system-architecture-diagram)
 9. [AI Pipeline & Multimodal Engineering Workflow](#-ai-pipeline--multimodal-engineering-workflow)
 10. [Database Schema & Vector Search (`pgvector`)](#-database-schema--vector-search-pgvector)
 11. [REST API Reference & Endpoints](#-rest-api-reference--endpoints)
@@ -81,12 +80,18 @@ MeetPilot AI breaks this cycle by introducing an **autonomous intelligence layer
 
 ## 🧩 The Problem Statement & Real-World Impact
 
-```
-┌─────────────────────────────────────────────────────────────────────────────────┐
-│                           THE TRADITIONAL MEETING GAP                           │
-│                                                                                 │
-│   🎙️ Meeting Happens ➔ 📝 Notes Forgotten ➔ ❓ Tasks Lost ➔ 🔁 Re-Debate Topic   │
-└─────────────────────────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart LR
+    A["🎙️ Meeting Happens"] --> B["📝 Notes Forgotten"]
+    B --> C["❓ Tasks Lost & Delayed"]
+    C --> D["🔁 Re-Debate Same Decisions"]
+    D --> E["📉 Productivity & Velocity Drop"]
+
+    style A fill:#1e293b,stroke:#3b82f6,stroke-width:2px,color:#fff
+    style B fill:#331010,stroke:#ef4444,stroke-width:2px,color:#fff
+    style C fill:#331010,stroke:#ef4444,stroke-width:2px,color:#fff
+    style D fill:#331010,stroke:#f59e0b,stroke-width:2px,color:#fff
+    style E fill:#450a0a,stroke:#dc2626,stroke-width:2px,color:#fff
 ```
 
 1. **The Execution Gap (Communication Debt):**  
@@ -100,34 +105,31 @@ MeetPilot AI breaks this cycle by introducing an **autonomous intelligence layer
 
 ---
 
-## 🚀 The MeetPilot AI Solution
+## 🚀 The MeetPilot AI Solution Flowchart
 
-```
-                 🎙️ Raw Meeting Audio / Video (MP3 / WAV / MP4)
-                                      │
-                                      ▼
-                   ⚡ Distributed Task Queue (Celery + Redis)
-                                      │
-                                      ▼
-               🤖 Multimodal LLM Reasoning Engine (Google Gemini)
-                                      │
-      ┌───────────────────────┬───────┴───────────────────────┐
-      ▼                       ▼                               ▼
-📝 Diarized Transcript   🧠 Executive Briefing          ⚖️ Decision Registry
- (Timestamped Speakers)  (Summary, Points, Next Steps)  (Consensus & Trade-offs)
-      │                       │                               │
-      └───────────────────────┼───────────────────────────────┘
-                              ▼
-                     ✅ Action Item Engine
-             (Owner Extraction, Due Dates, Priority)
-                              │
-            ┌─────────────────┴─────────────────┐
-            ▼                                   ▼
-    📋 Interactive Kanban Board       🔍 Vector Embeddings (pgvector)
-    (Todo ➔ In Progress ➔ Done)                 │
-                                                ▼
-                                      💬 "Ask Your Meetings"
-                                       Conversational RAG Chat
+```mermaid
+flowchart TD
+    A["🎙️ Raw Meeting Audio / Video<br/><i>(MP3 / WAV / MP4 / M4A)</i>"] --> B["⚡ Async Task Queue<br/><b>Celery 5.4 + Redis 7 Broker</b>"]
+    B --> C["🤖 Multimodal Reasoning Engine<br/><b>Google Gemini 1.5 / 2.0</b>"]
+    
+    C --> D["📝 Diarized Transcript<br/><i>Timestamped Speakers</i>"]
+    C --> E["🧠 Executive Briefing<br/><i>Summary & Key Points</i>"]
+    C --> F["⚖️ Decision Registry<br/><i>Consensus & Trade-offs</i>"]
+    
+    D --> G["✅ Action Item Engine<br/><i>Owner, Deadline & Priority</i>"]
+    E --> G
+    F --> G
+    
+    G --> H["📋 Interactive Kanban Board<br/><i>(Todo ➔ In Progress ➔ Done)</i>"]
+    G --> I["🔍 Vector Embeddings<br/><i>PostgreSQL + pgvector</i>"]
+    
+    I --> J["💬 'Ask Your Meetings'<br/><b>Conversational RAG Chat</b>"]
+    
+    style A fill:#1e293b,stroke:#3b82f6,stroke-width:2px,color:#fff
+    style B fill:#1e293b,stroke:#eab308,stroke-width:2px,color:#fff
+    style C fill:#311042,stroke:#a855f7,stroke-width:2px,color:#fff
+    style H fill:#064e3b,stroke:#10b981,stroke-width:2px,color:#fff
+    style J fill:#1e1b4b,stroke:#6366f1,stroke-width:2px,color:#fff
 ```
 
 ---
@@ -167,15 +169,30 @@ MeetPilot AI is packed with enterprise-grade features designed to maximize clari
 * **Live Drag-and-Drop Kanban Board:** Extracted tasks populate an interactive Kanban board (`TODO` ➔ `IN PROGRESS` ➔ `DONE`).
 * **Real-time Status Tracking:** Developers and students can update task states, modify assignees, or re-prioritize items with instant backend persistence.
 
-```
-┌───────────────────────────────┬───────────────────────────────┬───────────────────────────────┐
-│          TODO (2)             │        IN PROGRESS (1)        │           DONE (3)            │
-├───────────────────────────────┼───────────────────────────────┼───────────────────────────────┤
-│ 🔐 Implement Clerk JWT Auth   │ ⚙️ Setup Celery Redis Worker   │ 📦 Dockerize pgvector DB      │
-│ 👤 Subham Nabik               │ 👤 Alex Rivera                │ 👤 Subham Nabik               │
-│ 📅 Due: Tomorrow              │ 📅 Due: Friday                │ 📅 Completed: Today           │
-│ 🚦 High Priority              │ 🚦 Medium Priority            │ 🚦 High Priority              │
-└───────────────────────────────┴───────────────────────────────┴───────────────────────────────┘
+```mermaid
+flowchart LR
+    subgraph AudioStream ["Spoken Dialogue"]
+        S["'Subham will finish the auth audit by Friday with High priority'"]
+    end
+
+    subgraph Extraction ["AI Task Extraction"]
+        T["Task: Complete Auth Audit<br/>Assignee: Subham Nabik<br/>Due Date: Friday<br/>Priority: High"]
+    end
+
+    subgraph Kanban ["Interactive Kanban Board"]
+        TODO["📋 TODO Column"]
+        INP["⚙️ IN PROGRESS"]
+        DONE["✅ DONE"]
+        TODO --> INP --> DONE
+    end
+
+    S --> T --> TODO
+
+    style S fill:#1e293b,stroke:#64748b,color:#fff
+    style T fill:#311042,stroke:#a855f7,color:#fff
+    style TODO fill:#0f172a,stroke:#3b82f6,color:#fff
+    style INP fill:#0f172a,stroke:#eab308,color:#fff
+    style DONE fill:#064e3b,stroke:#10b981,color:#fff
 ```
 
 ---
@@ -252,41 +269,14 @@ LIMIT 5;
 
 MeetPilot AI was architected from day one to deliver maximum scores across every single official evaluation rubric:
 
-```
-┌────────────────────────────────────────────────────────────────────────────────────────┐
-│                        IEMHACKS 4.0 EVALUATION RUBRIC ALIGNMENT                        │
-├──────────────────────────────┬────────┬────────────────────────────────────────────────┤
-│ Evaluation Criteria          │ Target │ Architectural & Implementation Demonstration   │
-├──────────────────────────────┼────────┼────────────────────────────────────────────────┤
-│ 💡 Innovation & Creativity   │ 10/10  │ • Autonomous conversation-to-Kanban pipeline   │
-│                              │        │ • Multi-stage Gemini reasoning beyond simple STT│
-│                              │        │ • Dedicated Decision Intelligence Registry     │
-│                              │        │ • Verified timestamp-grounded RAG assistance   │
-├──────────────────────────────┼────────┼────────────────────────────────────────────────┤
-│ ⚙️ Technical Implementation   │ 10/10  │ • High-performance FastAPI asynchronous API    │
-│                              │        │ • Celery distributed worker queue with Redis 7 │
-│                              │        │ • PostgreSQL 16 + native pgvector indexing     │
-│                              │        │ • React 19 + TypeScript + Vite + TailwindCSS   │
-├──────────────────────────────┼────────┼────────────────────────────────────────────────┤
-│ 🎯 Problem Relevance         │ 10/10  │ • Directly eliminates 71% wasted meeting time  │
-│                              │        │ • Solves communication debt in remote teams    │
-│                              │        │ • Perfect fit for Open Innovation & Ed-Tech    │
-├──────────────────────────────┼────────┼────────────────────────────────────────────────┤
-│ 📈 Feasibility & Scalability │ 10/10  │ • Decoupled async architecture (non-blocking)  │
-│                              │        │ • Horizontally scalable Celery worker pods     │
-│                              │        │ • pgvector handles millions of vector chunks   │
-│                              │        │ • Containerized with Docker Compose            │
-├──────────────────────────────┼────────┼────────────────────────────────────────────────┤
-│ 🎨 User Experience & Design  │ 10/10  │ • Sleek dark-mode glassmorphic interface       │
-│                              │        │ • Fluid drag-and-drop Kanban board             │
-│                              │        │ • Synchronized audio player & transcript seeker│
-│                              │        │ • Responsive design across all desktop viewports│
-├──────────────────────────────┼────────┼────────────────────────────────────────────────┤
-│ 📽️ Presentation & Demo       │ 10/10  │ • 100% working live prototype deployed         │
-│                              │        │ • Comprehensive OpenAPI/Swagger specifications │
-│                              │        │ • Structured video walkthrough & pitch deck    │
-└──────────────────────────────┴────────┴────────────────────────────────────────────────┘
-```
+| Judging Criteria | Score Target | Architectural & Implementation Demonstration |
+| :--- | :---: | :--- |
+| 💡 **Innovation & Creativity** | **10 / 10** | • Autonomous conversation-to-Kanban ticket extraction pipeline.<br/>• Multi-stage Gemini multimodal reasoning beyond simple speech-to-text.<br/>• Dedicated Decision Intelligence Registry preserving technical rationale.<br/>• Hallucination-free conversational RAG with verified timestamp citations. |
+| ⚙️ **Technical Implementation** | **10 / 10** | • High-performance FastAPI asynchronous REST API.<br/>• Celery distributed worker queue with Redis 7 in-memory broker.<br/>• Native PostgreSQL 16 + `pgvector` cosine similarity indexing.<br/>• Modern React 19 + TypeScript + Vite + TailwindCSS frontend. |
+| 🎯 **Problem Relevance** | **10 / 10** | • Directly eliminates 71% of wasted meeting time and communication debt.<br/>• Bridges the gap between verbal discussions and concrete engineering execution.<br/>• Directly powers both the **Open Innovation** and **Ed-Tech** tracks. |
+| 📈 **Feasibility & Scalability** | **10 / 10** | • Decoupled microservices architecture prevents server bottlenecks.<br/>• Celery worker pods can be scaled horizontally across container clusters.<br/>• `pgvector` easily scales to millions of meeting vector segments.<br/>• Fully containerized and reproducible with Docker Compose. |
+| 🎨 **User Experience & Design** | **10 / 10** | • Premium dark-mode glassmorphic interface with micro-interactions.<br/>• Interactive drag-and-drop Kanban task board.<br/>• Synchronized audio waveform playback with one-click transcript jump.<br/>• Fully responsive across mobile, tablet, and widescreen monitors. |
+| 📽️ **Presentation & Demo** | **10 / 10** | • Fully deployed 100% working live prototype.<br/>• Comprehensive OpenAPI 3.0 / Swagger documentation (`/docs`).<br/>• Structured video walkthrough and polished pitch deck. |
 
 ---
 
@@ -307,115 +297,159 @@ While entered under **Open Innovation**, MeetPilot AI directly empowers multiple
 
 ---
 
-## 🏗️ System Architecture & Data Flow
+## 🏗️ System Architecture Diagram
 
-```
-                          ┌────────────────────────┐
-                          │   Frontend Application  │
-                          │ React 19 + TypeScript   │
-                          │ Vite + Tailwind CSS 4   │
-                          │ SWR Data Fetching       │
-                          └───────────┬────────────┘
-                                      │
-                              Clerk JWT Bearer Token
-                                      │
-                                      ▼
-                          ┌────────────────────────┐
-                          │   FastAPI REST Backend │
-                          │ Python 3.11 + Pydantic │
-                          │ Async Route Handlers   │
-                          └───────────┬────────────┘
-                                      │
-                 ┌────────────────────┼────────────────────┐
-                 │                    │                    │
-                 ▼                    ▼                    ▼
-        ┌─────────────────┐  ┌─────────────────┐  ┌─────────────────┐
-        │ PostgreSQL 16   │  │   Redis 7       │  │ Audio Storage   │
-        │ + pgvector      │  │ Message Broker  │  │ Volume / Local  │
-        │ Relational+Embed│  │ & Celery Backend│  │ File Ingestion  │
-        └─────────────────┘  └────────┬────────┘  └─────────────────┘
-                                      │
-                                      ▼
-                          ┌────────────────────────┐
-                          │  Celery Worker Process │
-                          │  Async Media Ingestion │
-                          │  Embeddings Generation │
-                          └───────────┬────────────┘
-                                      │
-                                      ▼
-                          ┌────────────────────────┐
-                          │  Google Gemini Engine  │
-                          │  Multimodal Reasoning  │
-                          │  Diarization & Summary │
-                          └────────────────────────┘
+```mermaid
+flowchart TB
+    subgraph ClientLayer ["Client Layer (Frontend)"]
+        UI["🖥️ React 19 + TypeScript (Vite 6)"]
+        SWR["⚡ SWR Reactive State Management"]
+        Tailwind["🎨 Tailwind CSS 4 + Lucide Icons"]
+        UI --- SWR
+        UI --- Tailwind
+    end
+
+    subgraph AuthLayer ["Security & Identity"]
+        Clerk["🔐 Clerk Authentication (JWT Bearer Token)"]
+    end
+
+    subgraph GatewayLayer ["API Gateway & Core Handlers"]
+        FastAPI["⚡ FastAPI REST API (Python 3.11)"]
+        Pydantic["🛡️ Pydantic V2 Schemas & Validation"]
+        SQLA["🗄️ SQLAlchemy 2.0 ORM + Alembic"]
+        FastAPI --- Pydantic
+        FastAPI --- SQLA
+    end
+
+    subgraph AsyncLayer ["Asynchronous Execution Layer"]
+        Redis["📦 Redis 7 (Message Broker & Cache)"]
+        Celery["⚙️ Celery 5.4 Distributed Task Workers"]
+        Storage["📁 File Storage (Media Ingestion Volume)"]
+        Redis --> Celery
+    end
+
+    subgraph DatabaseLayer ["Data & Vector Intelligence"]
+        Postgres[("🐘 PostgreSQL 16")]
+        PGVector["📐 pgvector Extension (Cosine Similarity)"]
+        Postgres --- PGVector
+    end
+
+    subgraph AIEngine ["GenAI Multimodal Engine"]
+        Gemini["🤖 Google Gemini 1.5 / 2.0"]
+        Embeddings["🧬 Gemini Text Embeddings (768-dim)"]
+        Gemini --- Embeddings
+    end
+
+    UI -->|JWT Auth Session| Clerk
+    UI -->|Authenticated REST Requests| FastAPI
+    FastAPI -->|Enqueue Media Jobs| Redis
+    FastAPI -->|Relational Queries| Postgres
+    FastAPI -->|Vector Similarity Queries| PGVector
+    Celery -->|Read/Write Audio Files| Storage
+    Celery -->|Stream Media Payload| Gemini
+    Celery -->|Store Vectors & Entities| Postgres
+
+    style ClientLayer fill:#0f172a,stroke:#3b82f6,stroke-width:2px,color:#fff
+    style AuthLayer fill:#1e1b4b,stroke:#818cf8,stroke-width:2px,color:#fff
+    style GatewayLayer fill:#064e3b,stroke:#10b981,stroke-width:2px,color:#fff
+    style AsyncLayer fill:#312e81,stroke:#a855f7,stroke-width:2px,color:#fff
+    style DatabaseLayer fill:#1e293b,stroke:#0284c7,stroke-width:2px,color:#fff
+    style AIEngine fill:#3b0764,stroke:#d946ef,stroke-width:2px,color:#fff
 ```
 
 ---
 
 ## 🧠 AI Pipeline & Multimodal Engineering Workflow
 
-```
-[1. User Uploads Audio/Video File]
-              │
-              ▼
-[2. FastAPI validates MIME type, saves file to storage volume, inserts Meeting record (status: PROCESSING)]
-              │
-              ▼
-[3. FastAPI dispatches asynchronous task to Redis queue: process_meeting_task.delay(meeting_id)]
-              │
-              ▼
-[4. Celery Worker picks up job & streams audio bytes to Google Gemini API]
-              │
-              ├──► 4a. Transcribes speech with Speaker Diarization & millisecond timestamps
-              ├──► 4b. Extracts Executive Briefing, Discussion Topics & Key Takeaways
-              ├──► 4c. Extracts Action Items (Assignee, Inferred Due Date, Priority Rating)
-              └──► 4d. Extracts Consensus Decisions, Alternatives & Strategic Rationale
-              │
-              ▼
-[5. Celery Worker breaks transcript into semantic segments & generates Gemini Text Embeddings]
-              │
-              ▼
-[6. Bulk inserts vectors into PostgreSQL transcript_embeddings table using pgvector]
-              │
-              ▼
-[7. Celery Worker transitions Meeting record status to COMPLETED]
-              │
-              ▼
-[8. Frontend SWR detects completion -> Live Dashboard, Kanban, Audio Player & RAG Chat become interactive]
+```mermaid
+sequenceDiagram
+    autonumber
+    actor User as 👤 User / Team
+    participant Client as 🖥️ Frontend (React 19)
+    participant API as ⚡ FastAPI Backend
+    participant Storage as 📁 Media Storage
+    participant Queue as 📦 Redis + Celery
+    participant Gemini as 🤖 Google Gemini AI
+    participant DB as 🐘 PostgreSQL + pgvector
+
+    User->>Client: Uploads Meeting Audio/Video (.mp3/.wav/.mp4)
+    Client->>API: POST /api/meetings/upload (Multipart FormData)
+    API->>Storage: Persist media to storage volume
+    API->>DB: Insert Meeting record (Status: PROCESSING)
+    API->>Queue: Dispatch process_meeting_task.delay(meeting_id)
+    API-->>Client: 201 Created (Instant non-blocking response)
+    
+    Queue->>Gemini: Stream audio buffer with Multimodal Prompts
+    Gemini-->>Queue: Return Diarized Transcript, Summary, Action Items & Decisions
+    Queue->>Gemini: Request Text Embeddings for Transcript Chunks
+    Gemini-->>Queue: High-Dimensional Vectors (768-dim)
+    
+    Queue->>DB: Bulk insert transcript segments + embeddings
+    Queue->>DB: Insert extracted tasks and decision records
+    Queue->>DB: Update Meeting status = COMPLETED
+    
+    Client->>API: SWR Polls GET /api/meetings/{id}
+    API-->>Client: Return complete structured meeting dataset
+    Client->>User: Renders Interactive Dashboard, Kanban & Audio Sync
 ```
 
 ---
 
 ## 🗄️ Database Schema & Vector Search (`pgvector`)
 
-The database architecture uses **PostgreSQL 16** with the official `pgvector` extension, configured for multi-tenant isolation:
+```mermaid
+erDiagram
+    WORKSPACES ||--o{ MEETINGS : contains
+    MEETINGS ||--o{ TRANSCRIPT_SEGMENTS : generates
+    MEETINGS ||--o{ TASKS : yields
+    MEETINGS ||--o{ DECISIONS : logs
 
-```text
-┌────────────────────────┐       ┌────────────────────────┐       ┌────────────────────────┐
-│       workspaces       │       │        meetings        │       │  transcript_segments   │
-├────────────────────────┤       ├────────────────────────┤       ├────────────────────────┤
-│ id (UUID, PK)          │◄──┐   │ id (UUID, PK)          │◄──┐   │ id (UUID, PK)          │
-│ name (VARCHAR)         │   └───┤ workspace_id (UUID, FK)│   └───┤ meeting_id (UUID, FK)  │
-│ owner_id (VARCHAR)     │       │ title (VARCHAR)        │       │ speaker_label (VARCHAR)│
-│ created_at (TIMESTAMP) │       │ status (ENUM)          │       │ text (TEXT)            │
-└────────────────────────┘       │ audio_url (VARCHAR)    │       │ start_time (FLOAT)     │
-                                 │ summary (JSONB)        │       │ end_time (FLOAT)       │
-                                 │ created_at (TIMESTAMP) │       │ embedding (VECTOR(768))│
-                                 └───────────┬────────────┘       └────────────────────────┘
-                                             │
-                         ┌───────────────────┴───────────────────┐
-                         ▼                                       ▼
-             ┌────────────────────────┐              ┌────────────────────────┐
-             │         tasks          │              │       decisions        │
-             ├────────────────────────┤              ├────────────────────────┤
-             │ id (UUID, PK)          │              │ id (UUID, PK)          │
-             │ meeting_id (UUID, FK)  │              │ meeting_id (UUID, FK)  │
-             │ title (VARCHAR)        │              │ title (VARCHAR)        │
-             │ assignee (VARCHAR)     │              │ context (TEXT)         │
-             │ due_date (DATE)        │              │ consensus (TEXT)       │
-             │ priority (ENUM)        │              │ alternatives (TEXT)    │
-             │ status (ENUM: TODO/..) │              │ created_at (TIMESTAMP) │
-             └────────────────────────┘              └────────────────────────┘
+    WORKSPACES {
+        uuid id PK
+        string name
+        string owner_id
+        timestamp created_at
+    }
+
+    MEETINGS {
+        uuid id PK
+        uuid workspace_id FK
+        string title
+        string status "PROCESSING | COMPLETED | FAILED"
+        string audio_url
+        jsonb summary
+        timestamp created_at
+    }
+
+    TRANSCRIPT_SEGMENTS {
+        uuid id PK
+        uuid meeting_id FK
+        string speaker_label
+        text text
+        float start_time
+        float end_time
+        vector_768 embedding "pgvector cosine index"
+    }
+
+    TASKS {
+        uuid id PK
+        uuid meeting_id FK
+        string title
+        string assignee
+        date due_date
+        string priority "HIGH | MEDIUM | LOW"
+        string status "TODO | IN_PROGRESS | DONE"
+    }
+
+    DECISIONS {
+        uuid id PK
+        uuid meeting_id FK
+        string title
+        text context
+        text consensus
+        text alternatives
+        timestamp created_at
+    }
 ```
 
 ---
@@ -448,32 +482,36 @@ All endpoints are self-documented via OpenAPI 3.0 at `http://localhost:8000/docs
 
 ## 🛠️ Tech Stack Matrix
 
-```
-┌─────────────────┬───────────────────────────────────┬────────────────────────────────────────┐
-│ Layer           │ Technology                        │ Purpose                                │
-├─────────────────┼───────────────────────────────────┼────────────────────────────────────────┤
-│ Frontend        │ React 19 + TypeScript             │ High-performance component architecture│
-│                 │ Vite 6                            │ Lightning-fast build tooling & HMR     │
-│                 │ Tailwind CSS 4 + Motion           │ Modern dark-mode glassmorphic styling  │
-│                 │ SWR (Stale-While-Revalidate)      │ Real-time reactive state management    │
-│                 │ Lucide React                      │ Consistent, accessible iconography     │
-│                 │ Clerk SDK                         │ Multi-tenant JWT auth & session tokens │
-├─────────────────┼───────────────────────────────────┼────────────────────────────────────────┤
-│ Backend API     │ Python 3.11 + FastAPI 0.115       │ High-concurrency async REST API        │
-│                 │ SQLAlchemy 2.0 + Alembic          │ Type-safe ORM & DB migration engine    │
-│                 │ Pydantic V2 + Settings            │ Robust schema validation & parsing     │
-│                 │ Uvicorn + Gunicorn                │ Production ASGI server container       │
-├─────────────────┼───────────────────────────────────┼────────────────────────────────────────┤
-│ Task Queue      │ Celery 5.4                        │ Distributed asynchronous task workers  │
-│                 │ Redis 7 (Alpine)                  │ In-memory message broker & cache       │
-├─────────────────┼───────────────────────────────────┼────────────────────────────────────────┤
-│ AI & Vectors    │ Google Gemini 1.5 / 2.0           │ Multimodal reasoning & structured JSON │
-│                 │ Gemini Text Embeddings            │ High-dimensional vector generation     │
-│                 │ PostgreSQL 16 + pgvector          │ Native relational & vector database    │
-├─────────────────┼───────────────────────────────────┼────────────────────────────────────────┤
-│ Infrastructure  │ Docker & Docker Compose           │ Microservice multi-container orchestration│
-│                 │ Linux Alpine / Debian Slim        │ Minimal attack surface base images     │
-└─────────────────┴───────────────────────────────────┴────────────────────────────────────────┘
+```mermaid
+mindmap
+  root((MeetPilot AI Stack))
+    Frontend
+      React 19
+      TypeScript
+      Vite 6
+      Tailwind CSS 4
+      SWR
+      Lucide React
+      Clerk Auth
+    Backend API
+      Python 3.11
+      FastAPI 0.115
+      SQLAlchemy 2.0
+      Pydantic V2
+      Alembic
+      Uvicorn ASGI
+    Distributed Workers
+      Celery 5.4
+      Redis 7 Alpine
+    AI & Vector Store
+      Google Gemini 1.5/2.0
+      Gemini Embeddings
+      PostgreSQL 16
+      pgvector extension
+    DevOps & Containerization
+      Docker
+      Docker Compose
+      Alpine Linux
 ```
 
 ---
@@ -621,22 +659,22 @@ Open [http://localhost:3000](http://localhost:3000) in your browser.
 
 ## 🔮 Future Roadmap
 
-```
-  Phase 1: Hackathon Core (Completed ✅)
-  ├── Multimodal Audio Ingestion & Diarization
-  ├── Google Gemini Structured Synthesis & Action Extraction
-  ├── Interactive Drag-and-Drop Kanban Board
-  └── pgvector Semantic Search & Grounded Conversational RAG
-
-  Phase 2: Live Meeting Streaming (Q3 2026)
-  ├── 🔴 Real-Time WebSockets Live Transcription
-  ├── 🎙️ In-browser microphone streaming without pre-recording
-  └── 🔔 Automated Discord, Slack & Microsoft Teams Webhooks
-
-  Phase 3: Deep Workflow Integrations (Q4 2026)
-  ├── 🔗 Two-way Synchronization with Jira, Linear, Asana & GitHub Issues
-  ├── 📅 Google Calendar & Zoom OAuth automatic cloud ingestion
-  └── 📊 Team Execution Velocity & Meeting Effectiveness Metrics
+```mermaid
+timeline
+    title 🔮 MeetPilot AI Engineering Evolution
+    section Phase 1 (Hackathon Core ✅)
+      Multimodal Ingestion : MP3, WAV, MP4 audio/video uploads
+      AI Synthesis : Gemini diarization, summary & decision extraction
+      Execution Layer : Interactive drag-and-drop Kanban board
+      Vector RAG : PostgreSQL pgvector cosine similarity search
+    section Phase 2 (Q3 2026)
+      Live Streaming : Real-time WebSockets streaming transcription
+      In-Browser Capture : Browser audio & microphone capture
+      Team Notifications : Discord & Slack webhook bots
+    section Phase 3 (Q4 2026)
+      Two-Way Sync : Linear, Jira & GitHub Issues integrations
+      Calendar Automation : Zoom Cloud & Google Calendar OAuth sync
+      Productivity Metrics : Team velocity & decision effectiveness analytics
 ```
 
 ---
