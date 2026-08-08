@@ -308,9 +308,9 @@ Meetings can become the starting point for downstream team execution rather than
 
 ---
 
-## AI Meeting Chat
+## Analysis Page
 
-![AI Meeting Chat](screenshots/ai-chat.png)
+![Analysis Page](screenshots/analysis.png)
 
 ---
 
