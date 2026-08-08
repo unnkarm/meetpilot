@@ -536,7 +536,14 @@ mindmap
 
 ---
 
-### 4. Interactive Team Kanban Board
+## Analysis Page
+
+![Analysis Page](screenshots/analysis.png)
+
+---
+
+## Task Management
+
 ![Kanban Task Board](screenshots/kanban.png)
 *AI-extracted tasks organized into Todo, In Progress, and Completed columns with assignees and priority badges.*
 
