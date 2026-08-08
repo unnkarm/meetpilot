@@ -33,10 +33,11 @@
 | Deliverable | Description | Link / Access |
 | :--- | :--- | :--- |
 | 🌐 **Working Prototype** | Fully deployed live web application with real-time AI processing | **[🔗 Launch MeetPilot AI Demo](https://meetpilot-ai.vercel.app)** *(or http://localhost:3000)* |
-| 📑 **Project Presentation** | Comprehensive Pitch Deck & Architecture Overview (PDF / PPT) | **[📊 View Presentation Deck](https://docs.google.com/presentation/d/meetpilot-iemhacks4)** |
+| 📑 **Project Presentation** | Comprehensive Pitch Deck & Architecture Overview (PDF / PPT) | **[📊 View Presentation Deck](https://drive.google.com/file/d/13AzKr-ucXS-DurjZjigVW9wDtkEBzv3k/view?usp=sharing)** |
 | 🎥 **Demonstration Video** | High-definition 3-minute end-to-end video walkthrough | **[🎬 Watch YouTube Demonstration](https://youtube.com/watch?v=meetpilot-demo)** |
 | 💻 **GitHub Repository** | Production-ready, verified open-source repository | **[🐙 GitHub: MeetPilot AI](https://github.com/YOUR_USERNAME/meetpilot)** |
 | 📖 **Interactive API Docs** | Live OpenAPI 3.0 / Swagger Interactive Documentation | **`http://localhost:8000/docs`** |
+
 
 ---
 
