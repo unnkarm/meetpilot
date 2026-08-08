@@ -20,12 +20,6 @@ Instead of leaving teams with a recording nobody watches and notes nobody update
 
 ---
 
-## 🚀 Pitch Deck
-
-**[🔗 Meetpilot Pitch Deck](https://drive.google.com/file/d/13AzKr-ucXS-DurjZjigVW9wDtkEBzv3k/view?usp=sharing)**
-
----
-
 ## 🧩 The Problem
 
 Meetings are where decisions are made.
@@ -748,3 +742,4 @@ If you found MeetPilot interesting:
 MeetPilot makes them work.**
 
 </p>
+
