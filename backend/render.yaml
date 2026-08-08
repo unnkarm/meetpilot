@@ -1,0 +1,80 @@
+services:
+  # FastAPI Web Service
+  - type: web
+    name: meetpilot-backend
+    env: python
+    region: oregon
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn -w 4 -k uvicorn.workers.UvicornWorker app.main:app --bind 0.0.0.0:$PORT
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: meetpilot-postgres
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          type: redis
+          name: meetpilot-redis
+          property: connectionString
+      - key: CELERY_BROKER_URL
+        fromService:
+          type: redis
+          name: meetpilot-redis
+          property: connectionString
+      - key: CELERY_RESULT_BACKEND
+        fromService:
+          type: redis
+          name: meetpilot-redis
+          property: connectionString
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: CLERK_SECRET_KEY
+        sync: false
+      - key: CLERK_PUBLISHABLE_KEY
+        sync: false
+      - key: CLERK_JWKS_URL
+        sync: false
+      - key: CORS_ORIGINS
+        value: "https://*.vercel.app,http://localhost:3000,http://localhost:5173"
+
+  # Celery Background Worker Service
+  - type: worker
+    name: meetpilot-worker
+    env: python
+    region: oregon
+    buildCommand: pip install -r requirements.txt
+    startCommand: celery -A app.core.celery_app.celery_app worker --loglevel=info
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: meetpilot-postgres
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          type: redis
+          name: meetpilot-redis
+          property: connectionString
+      - key: CELERY_BROKER_URL
+        fromService:
+          type: redis
+          name: meetpilot-redis
+          property: connectionString
+      - key: CELERY_RESULT_BACKEND
+        fromService:
+          type: redis
+          name: meetpilot-redis
+          property: connectionString
+      - key: GEMINI_API_KEY
+        sync: false
+
+# Managed Redis instance
+  - type: redis
+    name: meetpilot-redis
+    region: oregon
+    ipAllowList: []
+
+# Managed Postgres database with pgvector
+databases:
+  - name: meetpilot-postgres
+    region: oregon
+    postgresMajorVersion: 16
