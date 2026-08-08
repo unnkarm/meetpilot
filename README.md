@@ -22,7 +22,7 @@ Instead of leaving teams with a recording nobody watches and notes nobody update
 
 ## 🚀 Pitch Deck
 
-**[🔗 Meetpilot Pitch Deck](YOUR_DEPLOYED_LINK_HERE)**
+**[🔗 Meetpilot Pitch Deck](https://drive.google.com/file/d/13AzKr-ucXS-DurjZjigVW9wDtkEBzv3k/view?usp=sharing)**
 
 ---
 
