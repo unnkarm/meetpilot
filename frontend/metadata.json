@@ -1,0 +1,6 @@
+{
+  "name": "MeetPilot AI",
+  "description": "AI Meeting Intelligence Platform - transforms conversations into searchable transcripts, concise summaries, actionable tasks, and AI-powered workspace.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
