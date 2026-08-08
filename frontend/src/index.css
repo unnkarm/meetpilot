@@ -1,0 +1,634 @@
+@import "tailwindcss";
+
+@layer base {
+  body {
+    background-color: #09090B;
+    color: #FAFAFA;
+    font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    font-family: 'Plus Jakarta Sans', sans-serif;
+    letter-spacing: -0.02em;
+  }
+}
+
+.font-syne {
+  font-family: 'Syne', sans-serif;
+}
+
+.font-grotesk {
+  font-family: 'Space Grotesk', sans-serif;
+}
+
+.font-mono-code {
+  font-family: 'JetBrains Mono', monospace;
+}
+
+/* Editorial Minimalist Swiss Grid Utilities */
+.editorial-grid {
+  display: grid;
+  border-top: 1px solid #27272A;
+  border-left: 1px solid #27272A;
+}
+
+.editorial-card {
+  border-right: 1px solid #27272A;
+  border-bottom: 1px solid #27272A;
+  background-color: #111113;
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.editorial-card:hover {
+  background-color: #18181B;
+}
+
+/* Custom Product Hunt / YC Demo Day dark design system utilities */
+.bg-grid-pattern {
+  background-image: linear-gradient(to right, rgba(255, 255, 255, 0.04) 1px, transparent 1px),
+                    linear-gradient(to bottom, rgba(255, 255, 255, 0.04) 1px, transparent 1px);
+  background-size: 40px 40px;
+}
+
+.bg-dot-pattern {
+  background-image: radial-gradient(rgba(255, 255, 255, 0.08) 1px, transparent 1px);
+  background-size: 24px 24px;
+}
+
+.bg-radial-glow {
+  background: radial-gradient(circle at 50% 20%, rgba(139, 92, 246, 0.18) 0%, rgba(59, 130, 246, 0.08) 40%, transparent 75%);
+}
+
+.bg-radial-bottom {
+  background: radial-gradient(circle at 50% 100%, rgba(139, 92, 246, 0.22) 0%, rgba(59, 130, 246, 0.06) 50%, transparent 80%);
+}
+
+/* Floating animation utilities */
+@keyframes floatSlow {
+  0%, 100% { transform: translateY(0px) rotate(0deg); }
+  50% { transform: translateY(-8px) rotate(0.5deg); }
+}
+
+@keyframes floatReverse {
+  0%, 100% { transform: translateY(0px) rotate(0deg); }
+  50% { transform: translateY(8px) rotate(-0.5deg); }
+}
+
+@keyframes pulseGlow {
+  0%, 100% { opacity: 0.4; transform: scale(1); }
+  50% { opacity: 0.8; transform: scale(1.05); }
+}
+
+@keyframes cursorBlink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
+}
+
+.animate-float-slow {
+  animation: floatSlow 6s ease-in-out infinite;
+}
+
+.animate-float-reverse {
+  animation: floatReverse 7s ease-in-out infinite;
+}
+
+.animate-pulse-glow {
+  animation: pulseGlow 4s ease-in-out infinite;
+}
+
+.animate-cursor {
+  animation: cursorBlink 1s step-start infinite;
+}
+
+.glow-purple {
+  box-shadow: 0 0 35px -5px rgba(139, 92, 246, 0.25);
+}
+
+.glow-border {
+  border: 1px solid #27272A;
+  box-shadow: 0 0 25px -5px rgba(139, 92, 246, 0.08);
+}
+
+.glow-border-active {
+  border: 1px solid rgba(139, 92, 246, 0.5);
+  box-shadow: 0 0 30px -5px rgba(139, 92, 246, 0.3);
+}
+
+/* Custom sleek scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: #09090B;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #27272A;
+  border-radius: 9999px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #3B82F6;
+}
+
+/* ─────────────────────────────────────────────────────────────
+   CLERK DARK THEME OVERRIDES (Seamless Single-Card, No Nested Boxes)
+   ───────────────────────────────────────────────────────────── */
+.cl-rootBox,
+.cl-cardBox,
+.cl-card,
+.cl-cardContent,
+.cl-main,
+.cl-form,
+.cl-formContent,
+.cl-signIn-root,
+.cl-signUp-root,
+.cl-signIn-start,
+.cl-signUp-start {
+  background: transparent !important;
+  box-shadow: none !important;
+  border: none !important;
+  padding: 0 !important;
+  margin: 0 !important;
+  width: 100% !important;
+  max-width: 100% !important;
+  box-sizing: border-box !important;
+}
+
+.cl-header {
+  display: none !important;
+}
+
+.cl-headerTitle,
+.cl-headerSubtitle {
+  display: none !important;
+}
+
+/* ============================================================
+   SOCIAL BUTTON FINAL OVERRIDES
+   ============================================================ */
+
+.cl-socialButtons {
+  display: grid !important;
+  grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  gap: 0.75rem !important;
+  width: 100% !important;
+  padding-top: 0.75rem !important;
+  margin-top: 0.25rem !important;
+  margin-bottom: 0.65rem !important;
+  box-sizing: border-box !important;
+}
+
+.cl-socialButtons > div {
+  display: contents !important;
+}
+
+
+/* GOOGLE — FULL WIDTH WITH TOP BREATHING ROOM */
+.cl-socialButtons .cl-socialButtonsBlockButton__google,
+.cl-socialButtons .cl-socialButtonsIconButton__google,
+.cl-socialButtons .cl-socialButtonsBlockButton.cl-socialButtonsBlockButton__google,
+.cl-socialButtons button[data-provider="google"],
+.cl-socialButtons [data-provider="google"] {
+  grid-column: 1 / -1 !important;
+  grid-row: 1 !important;
+  width: 100% !important;
+  max-width: none !important;
+  min-width: 0 !important;
+  justify-self: stretch !important;
+  margin-top: 0.15rem !important;
+  overflow: visible !important;
+}
+
+
+/* GITHUB — LEFT */
+.cl-socialButtons .cl-socialButtonsBlockButton__github,
+.cl-socialButtons .cl-socialButtonsIconButton__github,
+.cl-socialButtons button[data-provider="github"],
+.cl-socialButtons [data-provider="github"] {
+  grid-column: 1 !important;
+  grid-row: 2 !important;
+  width: 100% !important;
+  min-width: 0 !important;
+}
+
+
+/* SLACK — RIGHT */
+.cl-socialButtons .cl-socialButtonsBlockButton__slack,
+.cl-socialButtons .cl-socialButtonsIconButton__slack,
+.cl-socialButtons button[data-provider="slack"],
+.cl-socialButtons [data-provider="slack"] {
+  grid-column: 2 !important;
+  grid-row: 2 !important;
+  width: 100% !important;
+  min-width: 0 !important;
+}
+
+
+/* ============================================================
+   BUTTON STYLING
+   ============================================================ */
+
+.cl-socialButtons .cl-socialButtonsBlockButton,
+.cl-socialButtons .cl-socialButtonsIconButton,
+.cl-socialButtons button[data-provider] {
+  width: 100% !important;
+  min-width: 0 !important;
+  max-width: 100% !important;
+
+  height: 2.75rem !important;
+
+  box-sizing: border-box !important;
+
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+
+  gap: 0.5rem !important;
+
+  background-color: #1A1A22 !important;
+  border: 1px solid #2D2D3B !important;
+  border-radius: 0.75rem !important;
+
+  color: #FFFFFF !important;
+  position: relative !important;
+  overflow: visible !important;
+}
+
+
+/* Hover */
+.cl-socialButtons button:hover {
+  background-color: #242430 !important;
+  border-color: #8B5CF6 !important;
+  box-shadow: 0 0 16px -4px rgba(139, 92, 246, 0.3) !important;
+}
+
+
+/* Text */
+.cl-socialButtons .cl-socialButtonsBlockButtonText {
+  color: #FFFFFF !important;
+  font-size: 0.82rem !important;
+  font-weight: 600 !important;
+  white-space: nowrap !important;
+}
+
+
+/* Hide arrow */
+.cl-socialButtons .cl-socialButtonsBlockButtonArrow {
+  display: none !important;
+}
+
+/* ============================================================
+   HIGH-CONTRAST SOCIAL ICONS (Pure White GitHub Icon)
+   ============================================================ */
+
+/* Target GitHub icon SVGs, paths, masks and images */
+[data-provider="github"] svg,
+[data-provider="github"] svg path,
+[data-provider="github"] svg g,
+[data-provider="github"] svg use,
+.cl-socialButtonsBlockButton__github svg,
+.cl-socialButtonsBlockButton__github svg path,
+.cl-socialButtonsBlockButton__github svg g,
+.cl-socialButtonsIconButton__github svg,
+.cl-socialButtonsIconButton__github svg path,
+.cl-socialButtonsIconButton__github svg g,
+.cl-socialButtons [class*="github"] svg,
+.cl-socialButtons [class*="github"] svg path,
+.cl-socialButtons [class*="github"] svg g,
+.cl-socialButtons [class*="Github"] svg,
+.cl-socialButtons [class*="Github"] svg path,
+.cl-socialButtons [data-provider="github"] [class*="Logo"] svg,
+.cl-socialButtons [data-provider="github"] [class*="Logo"] path,
+.cl-socialButtons [data-provider="github"] [class*="Icon"] svg,
+.cl-socialButtons [data-provider="github"] [class*="Icon"] path {
+  fill: #FFFFFF !important;
+  color: #FFFFFF !important;
+  stroke: transparent !important;
+  opacity: 1 !important;
+}
+
+/* If Clerk renders GitHub icon as an <img> tag or CSS mask */
+[data-provider="github"] img,
+.cl-socialButtonsBlockButton__github img,
+.cl-socialButtonsIconButton__github img,
+.cl-socialButtons [class*="github"] img,
+.cl-socialButtons [class*="Github"] img,
+.cl-socialButtons [data-provider="github"] [class*="Logo"] img,
+.cl-socialButtons [data-provider="github"] [class*="Icon"] img {
+  filter: brightness(0) invert(1) contrast(200%) !important;
+  opacity: 1 !important;
+}
+
+/* Ensure all button logos are properly sized and sharp */
+.cl-socialButtons [class*="socialButtonsBlockButtonLogo"],
+.cl-socialButtons [class*="socialButtonsIconButtonLogo"],
+.cl-socialButtons [class*="providerIcon"],
+.cl-socialButtons [class*="ProviderIcon"] {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  width: 1.15rem !important;
+  height: 1.15rem !important;
+}
+
+.cl-socialButtons [class*="socialButtonsBlockButtonLogo"] svg,
+.cl-socialButtons [class*="socialButtonsIconButtonLogo"] svg,
+.cl-socialButtons [class*="providerIcon"] svg,
+.cl-socialButtons [class*="ProviderIcon"] svg {
+  width: 1.15rem !important;
+  height: 1.15rem !important;
+}
+
+/* Badge (e.g. Last Used / Recommended) fully visible and cleanly centered */
+.cl-badge,
+.cl-socialButtonsBlockButtonBadge,
+.cl-socialButtonsBlockButtonBadge__google,
+.cl-socialButtons [class*="badge"],
+.cl-socialButtons [class*="Badge"],
+[data-localization-key*="badge"],
+[data-localization-key*="lastUsed"] {
+  position: absolute !important;
+  right: 0.75rem !important;
+  top: 50% !important;
+  transform: translateY(-50%) !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  background: linear-gradient(135deg, #8B5CF6, #7C3AED) !important;
+  color: #FFFFFF !important;
+  border-radius: 9999px !important;
+  font-size: 0.62rem !important;
+  font-weight: 700 !important;
+  padding: 0.15rem 0.55rem !important;
+  border: 1px solid rgba(255, 255, 255, 0.15) !important;
+  line-height: 1.2 !important;
+  white-space: nowrap !important;
+  box-shadow: 0 2px 6px rgba(139, 92, 246, 0.4) !important;
+  pointer-events: none !important;
+  z-index: 20 !important;
+}
+
+/* Symmetrical, Compact and High-Contrast "OR" Divider */
+.cl-dividerRow {
+  margin: 0.65rem 0 !important;
+  width: 100% !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  position: relative !important;
+}
+
+.cl-dividerLine {
+  background-color: #3F3F50 !important;
+  height: 1px !important;
+  opacity: 1 !important;
+}
+
+.cl-dividerText {
+  color: #A1A1AA !important;
+  background-color: #121217 !important;
+  font-size: 0.68rem !important;
+  font-weight: 700 !important;
+  text-transform: uppercase !important;
+  letter-spacing: 0.15em !important;
+  padding: 0 0.65rem !important;
+}
+
+/* Form Fields & High Contrast Inputs with Compact Spacing */
+.cl-formField {
+  margin-bottom: 0.65rem !important;
+  width: 100% !important;
+}
+
+.cl-formFieldLabel {
+  color: #E2E8F0 !important;
+  font-size: 0.75rem !important;
+  font-weight: 600 !important;
+  margin-bottom: 0.25rem !important;
+  display: block !important;
+}
+
+.cl-formFieldInput {
+  background-color: #181822 !important;
+  border: 1px solid #363648 !important;
+  color: #FFFFFF !important;
+  border-radius: 0.75rem !important;
+  font-size: 0.85rem !important;
+  padding: 0.65rem 0.85rem !important;
+  height: 2.75rem !important;
+  width: 100% !important;
+  box-sizing: border-box !important;
+  outline: none !important;
+  transition: all 0.15s ease !important;
+}
+
+.cl-formFieldInput:focus {
+  border-color: #8B5CF6 !important;
+  background-color: #1D1D28 !important;
+  box-shadow: 0 0 0 2px rgba(139, 92, 246, 0.25) !important;
+}
+
+.cl-formFieldInput::placeholder,
+input::placeholder {
+  color: #94A3B8 !important;
+  opacity: 1 !important;
+}
+
+/* Primary Action Button */
+.cl-formButtonPrimary {
+  background: linear-gradient(135deg, #8B5CF6 0%, #7C3AED 100%) !important;
+  color: #FFFFFF !important;
+  font-weight: 700 !important;
+  font-size: 0.85rem !important;
+  padding: 0.65rem 1rem !important;
+  height: 2.75rem !important;
+  width: 100% !important;
+  box-sizing: border-box !important;
+  border-radius: 0.75rem !important;
+  border: none !important;
+  box-shadow: 0 8px 20px -4px rgba(139, 92, 246, 0.4) !important;
+  transition: all 0.15s ease !important;
+  cursor: pointer !important;
+  margin-top: 0.5rem !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+}
+
+.cl-formButtonPrimary:hover {
+  background: linear-gradient(135deg, #7C3AED 0%, #6D28D9 100%) !important;
+  box-shadow: 0 10px 25px -4px rgba(139, 92, 246, 0.6) !important;
+  transform: translateY(-1px) !important;
+}
+
+/* Identity Preview */
+.cl-identityPreview {
+  background-color: #1E1E26 !important;
+  border: 1px solid #363648 !important;
+  border-radius: 0.75rem !important;
+  width: 100% !important;
+  box-sizing: border-box !important;
+  padding: 0.85rem 1rem !important;
+}
+
+.cl-identityPreviewText {
+  color: #FFFFFF !important;
+  font-weight: 600 !important;
+  font-size: 0.85rem !important;
+}
+
+.cl-identityPreviewEditButton {
+  color: #A78BFA !important;
+  font-weight: 700 !important;
+  font-size: 0.78rem !important;
+}
+
+.cl-formFieldAction {
+  color: #A78BFA !important;
+  font-size: 0.78rem !important;
+  font-weight: 600 !important;
+}
+
+.cl-formFieldSuccessText {
+  color: #34D399 !important;
+  font-size: 0.75rem !important;
+  font-weight: 500 !important;
+}
+
+.cl-formFieldErrorText {
+  color: #F87171 !important;
+  font-size: 0.75rem !important;
+  font-weight: 500 !important;
+  margin-top: 0.35rem !important;
+}
+
+.cl-alert {
+  background-color: rgba(239, 68, 68, 0.1) !important;
+  border: 1px solid rgba(239, 68, 68, 0.3) !important;
+  color: #FCA5A5 !important;
+  border-radius: 0.75rem !important;
+  font-size: 0.78rem !important;
+  padding: 0.85rem 1rem !important;
+}
+
+/* Footer layout & spacing */
+.cl-footer {
+  border-top: 1px solid #272733 !important;
+  padding-top: 1.25rem !important;
+  padding-bottom: 0.5rem !important;
+  margin-top: 1.25rem !important;
+  background: transparent !important;
+  width: 100% !important;
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: center !important;
+  justify-content: center !important;
+  gap: 0.75rem !important;
+  box-sizing: border-box !important;
+}
+
+.cl-footerAction {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  gap: 0.35rem !important;
+  margin: 0 !important;
+  padding: 0 !important;
+}
+
+.cl-footerActionText {
+  color: #94A3B8 !important;
+  font-size: 0.78rem !important;
+}
+
+.cl-footerActionLink {
+  color: #A78BFA !important;
+  font-weight: 700 !important;
+  font-size: 0.78rem !important;
+  transition: color 0.15s ease !important;
+}
+
+.cl-footerActionLink:hover {
+  color: #C4B5FD !important;
+  text-decoration: underline !important;
+}
+
+.cl-footerPages,
+.cl-footerPagesLink {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  gap: 0.5rem !important;
+}
+
+/* Development Mode badge alignment and conditional hiding in production */
+.cl-developmentBadge,
+[data-localization-key*="developmentMode"] {
+  position: static !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  margin-top: 0.35rem !important;
+  font-size: 0.7rem !important;
+}
+
+.is-production .cl-developmentBadge,
+.is-production [data-localization-key*="developmentMode"],
+.is-production .cl-internal-developmentBadge,
+.is-production [class*="developmentBadge"],
+.is-production [class*="DevelopmentMode"],
+.is-production .cl-footer [class*="badge"],
+.is-production .cl-internal-157s16f,
+.is-production .cl-internal-1dauvpw {
+  display: none !important;
+}
+
+/* Small breathing room above Google */
+.cl-socialButtons {
+  padding-top: 0.5rem !important;
+}
+
+/* ============================================================
+   SIGNUP — COMPACT VERTICAL SPACING
+   ============================================================ */
+
+/* Reduce spacing around the OR divider */
+.cl-signUp-root .cl-dividerRow {
+  margin: 0.4rem 0 !important;
+}
+
+/* Reduce gap between Email and Password fields */
+.cl-signUp-root .cl-formField {
+  margin-bottom: 0.4rem !important;
+}
+
+/* Slightly tighter labels */
+.cl-signUp-root .cl-formFieldLabel {
+  margin-bottom: 0.2rem !important;
+}
+
+/* Keep inputs compact */
+.cl-signUp-root .cl-formFieldInput {
+  height: 2.65rem !important;
+}
+
+/* Print Styles for PDF & Summary Export */
+@media print {
+  body {
+    background-color: #FFFFFF !important;
+    color: #111827 !important;
+  }
+  header, aside, .no-print, button, input, select {
+    display: none !important;
+  }
+  main {
+    padding: 0 !important;
+    background: transparent !important;
+    color: #111827 !important;
+  }
+}
+
+
