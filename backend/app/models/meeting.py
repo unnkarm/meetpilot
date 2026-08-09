@@ -11,6 +11,7 @@ from app.database.base import Base
 
 
 class MeetingStatus(str, enum.Enum):
+    in_progress = "in_progress"
     queued = "queued"
     processing = "processing"
     completed = "completed"
@@ -23,6 +24,9 @@ class Meeting(Base):
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     workspace_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("workspaces.id"), nullable=False)
     title: Mapped[str] = mapped_column(String(255), nullable=False)
+    source: Mapped[str] = mapped_column(String(32), default="upload", nullable=False)
+    native_meeting_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    vexa_bot_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
     audio_url: Mapped[str | None] = mapped_column(String(1024), nullable=True)
     duration_seconds: Mapped[int | None] = mapped_column(Integer, nullable=True)
     status: Mapped[MeetingStatus] = mapped_column(Enum(MeetingStatus), default=MeetingStatus.queued, nullable=False)

@@ -24,12 +24,20 @@ class MeetingCreateResponse(BaseModel):
     created_at: datetime
 
 
+class LiveMeetingStartRequest(BaseModel):
+    workspace_id: uuid.UUID
+    meeting_url: str
+    title: str | None = None
+
+
 class MeetingListItem(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: uuid.UUID
     title: str
     status: MeetingStatus
+    source: str = "upload"
+    native_meeting_id: str | None = None
     duration_seconds: int | None = None
     created_at: datetime
     participants: list[ParticipantOut] = []
