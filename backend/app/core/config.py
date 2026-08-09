@@ -54,6 +54,11 @@ class Settings(BaseSettings):
     ZOOM_CLIENT_SECRET: str = ""
     ZOOM_REDIRECT_URI: str = "http://localhost:3000/oauth/zoom/callback"
 
+    # Vexa.ai Self-Hosted Live Meeting Capture
+    VEXA_API_URL: str = "http://host.docker.internal:18056"
+    VEXA_WS_URL: str = "ws://host.docker.internal:18056/ws"
+    VEXA_API_KEY: str = "vxa_bot_NPdcTll20UtK1d1FJBq6xJlQ3j5qfzvu"
+
     @property
     def cors_origins_list(self) -> list[str]:
         return [o.strip() for o in self.CORS_ORIGINS.split(",") if o.strip()]
