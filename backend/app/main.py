@@ -5,7 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
 
 import app.models  # noqa: F401  (registers all models on Base.metadata)
-from app.api.routes import auth, chat, integrations, meetings, search, tasks, users, workspaces
+from app.api.routes import auth, chat, integrations, live_meetings, meetings, search, tasks, users, workspaces
 from app.core.config import settings
 
 from app.database.base import Base
@@ -60,6 +60,7 @@ app.include_router(auth.router)
 app.include_router(users.router)
 app.include_router(workspaces.router)
 app.include_router(meetings.router)
+app.include_router(live_meetings.router)
 app.include_router(tasks.router)
 app.include_router(search.router)
 app.include_router(chat.router)
@@ -69,7 +70,7 @@ app.include_router(integrations.router)
 
 @app.on_event("startup")
 def on_startup() -> None:
-    # Ensures the pgvector extension exists and schema columns are synchronized with Clerk auth architecture
+    # Ensures the pgvector extension exists and schema columns are synchronized
     with engine.begin() as conn:
         conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
         conn.execute(text("""
@@ -85,6 +86,17 @@ def on_startup() -> None:
                     END IF;
                     IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'users' AND column_name = 'avatar_url') THEN
                         ALTER TABLE users ADD COLUMN avatar_url VARCHAR(1024);
+                    END IF;
+                END IF;
+                IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'meetings') THEN
+                    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'meetings' AND column_name = 'source') THEN
+                        ALTER TABLE meetings ADD COLUMN source VARCHAR(32) DEFAULT 'upload' NOT NULL;
+                    END IF;
+                    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'meetings' AND column_name = 'native_meeting_id') THEN
+                        ALTER TABLE meetings ADD COLUMN native_meeting_id VARCHAR(255);
+                    END IF;
+                    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'meetings' AND column_name = 'vexa_bot_id') THEN
+                        ALTER TABLE meetings ADD COLUMN vexa_bot_id VARCHAR(255);
                     END IF;
                 END IF;
             END $$;
