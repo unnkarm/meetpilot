@@ -107,6 +107,16 @@ import {
   setClerkUserContext,
 } from '../services/api';
 import { LiveMeetingModal } from './LiveMeetingModal';
+import { MeetingHeader } from './workspace/MeetingHeader';
+import { MeetingAtAGlance } from './workspace/MeetingAtAGlance';
+import { MeetingAudioPlayer } from './workspace/MeetingAudioPlayer';
+import { DiarizedTranscript } from './workspace/DiarizedTranscript';
+import { ExecutiveIntelligence } from './workspace/ExecutiveIntelligence';
+import { ActionItemsView } from './workspace/ActionItemsView';
+import { MeetingAssistantChat } from './workspace/MeetingAssistantChat';
+import { ProcessingStateCard } from './workspace/ProcessingStateCard';
+import { MeetingErrorCard } from './workspace/MeetingErrorCard';
+import { getMeetingSpeakerStats, formatTimeSeconds } from '../utils/speakerUtils';
 
 
 
@@ -324,11 +334,16 @@ export const AppWorkspace: React.FC<AppWorkspaceProps> = ({ onBackToLanding }) =
   const { data: meetingDetail, mutate: mutateMeetingDetail } = useMeetingDetail(selectedMeetingId, getToken);
   const isMeetingProcessing = meetingDetail?.status === 'queued' || meetingDetail?.status === 'processing';
 
-  const { data: meetingSummary } = useMeetingSummary(selectedMeetingId, isMeetingProcessing, getToken);
-  const { data: meetingTranscript } = useMeetingTranscript(selectedMeetingId, isMeetingProcessing, getToken);
-  const { data: meetingDecisions } = useMeetingDecisions(selectedMeetingId, isMeetingProcessing, getToken);
-  const { data: meetingTasks } = useMeetingTasks(selectedMeetingId, isMeetingProcessing, getToken);
+  const { data: meetingSummary, mutate: mutateMeetingSummary } = useMeetingSummary(selectedMeetingId, isMeetingProcessing, getToken);
+  const { data: meetingTranscript, mutate: mutateMeetingTranscript } = useMeetingTranscript(selectedMeetingId, isMeetingProcessing, getToken);
+  const { data: meetingDecisions, mutate: mutateMeetingDecisions } = useMeetingDecisions(selectedMeetingId, isMeetingProcessing, getToken);
+  const { data: meetingTasks, mutate: mutateMeetingTasks } = useMeetingTasks(selectedMeetingId, isMeetingProcessing, getToken);
   const { data: serverChatHistory, mutate: mutateChat } = useMeetingChat(selectedMeetingId, getToken);
+
+  const speakerStats = useMemo(
+    () => getMeetingSpeakerStats(meetingDetail, meetingTranscript),
+    [meetingDetail, meetingTranscript]
+  );
 
   // Merge server chat history with active session messages
   useEffect(() => {
@@ -653,6 +668,98 @@ export const AppWorkspace: React.FC<AppWorkspaceProps> = ({ onBackToLanding }) =
     window.print();
   };
 
+  // Export Meeting to JSON
+  const handleExportJSON = () => {
+    if (!meetingDetail) return;
+    const exportData = {
+      meeting: {
+        id: meetingDetail.id,
+        title: meetingDetail.title,
+        status: meetingDetail.status,
+        duration_seconds: meetingDetail.duration_seconds,
+        created_at: meetingDetail.created_at,
+        source: meetingDetail.source,
+      },
+      summary: meetingSummary,
+      decisions: meetingDecisions,
+      tasks: meetingTasks,
+      transcript: meetingTranscript,
+    };
+    const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `${meetingDetail.title.toLowerCase().replace(/[^a-z0-9]+/g, '-')}-intelligence.json`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+    showToast('Meeting intelligence exported to JSON (.json)!');
+  };
+
+  // Modular Meeting Action Handlers
+  const handleRenameMeeting = async (newTitle: string) => {
+    if (!selectedMeetingId || !newTitle.trim()) return;
+    try {
+      await updateMeetingApi(selectedMeetingId, { title: newTitle.trim() }, getToken);
+      await mutateMeetingDetail();
+      await mutateMeetings();
+      showToast('Meeting title updated successfully!');
+    } catch (err: any) {
+      showToast(err.message || 'Failed to update meeting title', 'error');
+      throw err;
+    }
+  };
+
+  const handleRetryMeeting = async () => {
+    if (!selectedMeetingId) return;
+    try {
+      await retryMeetingApi(selectedMeetingId, getToken);
+      await mutateMeetingDetail();
+      await mutateMeetings();
+      showToast('Re-queued meeting in pipeline for analysis!');
+    } catch (err: any) {
+      showToast(err.message || 'Failed to retry processing', 'error');
+      throw err;
+    }
+  };
+
+  const handleAddMeetingTask = async (title: string, assignee: string, priority: TaskPriority, dueDate: string) => {
+    if (!activeWorkspaceId || !selectedMeetingId || !title.trim()) return;
+    try {
+      await createTaskApi(
+        activeWorkspaceId,
+        {
+          title: title.trim(),
+          meeting_id: selectedMeetingId,
+          assignee_name: assignee.trim() || undefined,
+          priority,
+          due_date: dueDate || 'This Week',
+        },
+        getToken
+      );
+      await mutateTasks();
+      await mutateMeetingTasks();
+      showToast('Action item created successfully!');
+    } catch (err: any) {
+      showToast(err.message || 'Failed to add action item', 'error');
+      throw err;
+    }
+  };
+
+  const handleUpdateTaskStatus = async (taskId: string, newStatus: TaskStatus) => {
+    try {
+      await updateTaskApi(taskId, { status: newStatus }, getToken);
+      await mutateTasks();
+      if (selectedMeetingId) {
+        await mutateMeetingTasks();
+      }
+      showToast(`Task status updated to ${newStatus.toUpperCase()}`);
+    } catch (err: any) {
+      showToast(err.message || 'Failed to update task status', 'error');
+    }
+  };
+
   // Step C1: Discord Webhook Handler
   const handleSaveDiscordWebhook = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -954,6 +1061,47 @@ export const AppWorkspace: React.FC<AppWorkspaceProps> = ({ onBackToLanding }) =
     }
   };
 
+  const handleSendChatDirect = async (question: string) => {
+    if (!selectedMeetingId || !question.trim() || sendingChat) return;
+
+    const tempUserMsg = {
+      id: `chat-${Date.now()}`,
+      role: 'user' as const,
+      content: question.trim(),
+      time: 'Just now',
+    };
+
+    setLocalChatMessages((prev) => [...prev, tempUserMsg]);
+    setSendingChat(true);
+
+    try {
+      const response = await sendChatMessageApi(selectedMeetingId, question.trim(), getToken);
+      setLocalChatMessages((prev) => [
+        ...prev,
+        {
+          id: `ai-${Date.now()}`,
+          role: 'assistant',
+          content: response.answer,
+          cited_timestamp: response.cited_timestamp,
+          time: 'Just now',
+        },
+      ]);
+      await mutateChat();
+    } catch (err: any) {
+      setLocalChatMessages((prev) => [
+        ...prev,
+        {
+          id: `err-${Date.now()}`,
+          role: 'assistant',
+          content: `Error: ${err.message || 'Failed to query meeting memory.'}`,
+          time: 'Just now',
+        },
+      ]);
+    } finally {
+      setSendingChat(false);
+    }
+  };
+
   // Computed Real Analytics
   const totalMeetingsCount = meetings?.length || 0;
   const completedMeetingsCount = meetings?.filter((m) => m.status === 'completed').length || 0;
@@ -972,8 +1120,8 @@ export const AppWorkspace: React.FC<AppWorkspaceProps> = ({ onBackToLanding }) =
     };
   }, [workspaceTasks]);
 
-  // Speaking time breakdown by speaker from current meeting transcript
-  const speakerStats = useMemo(() => {
+  // Speaking time breakdown by speaker from current meeting transcript for Analytics
+  const analyticsSpeakerStats = useMemo(() => {
     if (!meetingTranscript || meetingTranscript.length === 0) return [];
     const speakerMap: Record<string, number> = {};
     let totalSecs = 0;
@@ -1461,293 +1609,12 @@ export const AppWorkspace: React.FC<AppWorkspaceProps> = ({ onBackToLanding }) =
             </div>
           )}
 
-          {/* TAB 2: MEETING DETAIL */}
+          {/* TAB 2: MEETING INTELLIGENCE DETAIL */}
           {activeTab === 'meeting' && (
             <div className="space-y-6 animate-fadeIn">
-              {/* Meeting Selector Header */}
-              <div className="p-6 rounded-2xl bg-[#111113] border border-[#27272A] space-y-4">
-                <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 border-b border-[#27272A] pb-4">
-                  <div>
-                    <div className="flex items-center gap-2.5">
-                      {editingMeetingTitle && meetingDetail ? (
-                        <form onSubmit={handleUpdateMeetingTitle} className="flex items-center gap-2">
-                          <input
-                            type="text"
-                            value={renameMeetingInput}
-                            onChange={(e) => setRenameMeetingInput(e.target.value)}
-                            autoFocus
-                            className="bg-[#18181b] border border-[#8B5CF6] rounded-xl px-3 py-1 text-lg font-bold text-white focus:outline-none"
-                          />
-                          <button
-                            type="submit"
-                            disabled={savingMeetingTitle || !renameMeetingInput.trim()}
-                            className="px-3 py-1 rounded-xl bg-[#8B5CF6] hover:bg-[#7c3aed] text-white text-xs font-bold transition-colors cursor-pointer"
-                          >
-                            {savingMeetingTitle ? 'Saving...' : 'Save'}
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => setEditingMeetingTitle(false)}
-                            className="px-3 py-1 rounded-xl bg-[#18181b] text-slate-400 hover:text-white text-xs font-bold transition-colors cursor-pointer"
-                          >
-                            Cancel
-                          </button>
-                        </form>
-                      ) : (
-                        <div className="flex items-center gap-2">
-                          <h2 className="text-2xl font-extrabold text-white">
-                            {meetingDetail?.title || 'Select a Meeting'}
-                          </h2>
-                          {meetingDetail && (
-                            <button
-                              onClick={() => {
-                                setRenameMeetingInput(meetingDetail.title);
-                                setEditingMeetingTitle(true);
-                              }}
-                              title="Rename Meeting"
-                              className="p-1 rounded-lg text-slate-500 hover:text-slate-300 hover:bg-[#18181b] transition-colors cursor-pointer"
-                            >
-                              <Edit3 className="w-4 h-4" />
-                            </button>
-                          )}
-                        </div>
-                      )}
-
-                      {meetingDetail && !editingMeetingTitle && (
-                        <span
-                          className={`px-2.5 py-1 rounded font-mono text-xs font-bold ${
-                            meetingDetail.status === 'completed'
-                              ? 'bg-emerald-500/20 text-emerald-300'
-                              : meetingDetail.status === 'processing'
-                              ? 'bg-[#8B5CF6]/20 text-[#8B5CF6] animate-pulse flex items-center gap-1.5'
-                              : meetingDetail.status === 'queued'
-                              ? 'bg-amber-500/20 text-amber-300'
-                              : 'bg-rose-500/20 text-rose-300'
-                          }`}
-                        >
-                          {meetingDetail.status === 'processing' && <Loader2 className="w-3 h-3 animate-spin" />}
-                          {meetingDetail.status.toUpperCase()}
-                        </span>
-                      )}
-                    </div>
-                    {meetingDetail && (
-                      <div className="text-xs text-slate-400 flex items-center gap-3 mt-1">
-                        <span className="flex items-center gap-1">
-                          <Calendar className="w-3.5 h-3.5 text-[#8B5CF6]" /> {formatMeetingDate(meetingDetail.created_at)}
-                        </span>
-                        <span>•</span>
-                        <span className="flex items-center gap-1">
-                          <Clock className="w-3.5 h-3.5 text-[#8B5CF6]" /> {formatDuration(meetingDetail.duration_seconds)}
-                        </span>
-                        {meetingDetail.participants?.length > 0 && (
-                          <>
-                            <span>•</span>
-                            <span>{meetingDetail.participants.length} participants</span>
-                          </>
-                        )}
-                      </div>
-                    )}
-                  </div>
-
-
-                  {/* Switch between live meetings & delete button */}
-                  <div className="flex items-center gap-2">
-                    {meetings && meetings.length > 0 && (
-                      <select
-                        value={selectedMeetingId || ''}
-                        onChange={(e) => setSelectedMeetingId(e.target.value)}
-                        className="bg-[#18181b] border border-[#27272A] rounded-xl px-3 py-1.5 text-xs text-white focus:outline-none focus:border-[#8B5CF6]"
-                      >
-                        {meetings.map((m) => (
-                          <option key={m.id} value={m.id}>
-                            {m.title} ({m.status})
-                          </option>
-                        ))}
-                      </select>
-                    )}
-
-                    {/* Export Meeting Intelligence */}
-                    {meetingDetail && meetingDetail.status === 'completed' && (
-                      <div className="flex items-center gap-1.5">
-                        <button
-                          onClick={handleExportMarkdown}
-                          title="Export Markdown (.md)"
-                          className="px-3 py-1.5 rounded-xl bg-[#18181b] hover:bg-[#27272A] text-slate-300 hover:text-white border border-[#27272A] text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer"
-                        >
-                          <FileCode className="w-3.5 h-3.5 text-[#8B5CF6]" />
-                          <span className="hidden md:inline">Export .MD</span>
-                        </button>
-                        <button
-                          onClick={handleExportPDF}
-                          title="Export / Print PDF (.pdf)"
-                          className="px-3 py-1.5 rounded-xl bg-[#18181b] hover:bg-[#27272A] text-slate-300 hover:text-white border border-[#27272A] text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer"
-                        >
-                          <Printer className="w-3.5 h-3.5 text-emerald-400" />
-                          <span className="hidden md:inline">Print / PDF</span>
-                        </button>
-                      </div>
-                    )}
-
-                    {meetingDetail && (
-                      <button
-                        onClick={() => handleDeleteMeeting(meetingDetail.id, meetingDetail.title)}
-                        title="Delete Meeting"
-                        className="p-2 rounded-xl bg-[#18181b] hover:bg-rose-500/20 text-slate-400 hover:text-rose-400 border border-[#27272A] transition-colors cursor-pointer"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
-                    )}
-                  </div>
-                </div>
-
-
-                {/* Sub-tab Navigation */}
-                <div className="flex items-center gap-2 pt-1 overflow-x-auto">
-                  <button
-                    onClick={() => setMeetingSubTab('summary')}
-                    className={`px-4 py-2 rounded-xl text-xs font-bold transition-colors cursor-pointer ${
-                      meetingSubTab === 'summary'
-                        ? 'bg-[#8B5CF6] text-white'
-                        : 'bg-[#18181b] text-slate-400 hover:text-white'
-                    }`}
-                  >
-                    Summary & Decisions
-                  </button>
-
-                  <button
-                    onClick={() => setMeetingSubTab('transcript')}
-                    className={`px-4 py-2 rounded-xl text-xs font-bold transition-colors cursor-pointer ${
-                      meetingSubTab === 'transcript'
-                        ? 'bg-[#8B5CF6] text-white'
-                        : 'bg-[#18181b] text-slate-400 hover:text-white'
-                    }`}
-                  >
-                    Full Transcript ({meetingTranscript?.length || 0})
-                  </button>
-
-                  <button
-                    onClick={() => setMeetingSubTab('tasks')}
-                    className={`px-4 py-2 rounded-xl text-xs font-bold transition-colors cursor-pointer ${
-                      meetingSubTab === 'tasks'
-                        ? 'bg-[#8B5CF6] text-white'
-                        : 'bg-[#18181b] text-slate-400 hover:text-white'
-                    }`}
-                  >
-                    Action Items ({meetingTasks?.length || 0})
-                  </button>
-
-                  <button
-                    onClick={() => setMeetingSubTab('chat')}
-                    className={`px-4 py-2 rounded-xl text-xs font-bold transition-colors cursor-pointer flex items-center gap-1.5 ${
-                      meetingSubTab === 'chat'
-                        ? 'bg-[#8B5CF6] text-white'
-                        : 'bg-[#18181b] text-slate-400 hover:text-white'
-                    }`}
-                  >
-                    <Sparkles className="w-3.5 h-3.5 text-indigo-300" />
-                    <span>AI Assistant Chat</span>
-                  </button>
-                </div>
-              </div>
-
-              {/* REAL-WORLD STATES FOR MEETING DETAIL */}
-
-              {/* 0. Step C2 & C4: Live Capture View (in_progress) */}
-              {meetingDetail?.status === 'in_progress' && (
-                <div className="p-6 rounded-2xl bg-[#111113] border border-rose-500/40 space-y-6 animate-fadeIn shadow-2xl shadow-rose-950/20">
-                  {/* Live Status Header */}
-                  <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 p-4 rounded-xl bg-gradient-to-r from-rose-950/40 via-[#18181b] to-slate-900 border border-rose-500/30">
-                    <div className="flex items-center gap-3">
-                      <div className="relative flex items-center justify-center w-10 h-10 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-400">
-                        <Radio className="w-5 h-5 animate-pulse" />
-                        <span className="absolute -top-1 -right-1 w-3 h-3 bg-rose-500 rounded-full border-2 border-[#111113] animate-ping" />
-                      </div>
-                      <div>
-                        <div className="flex items-center gap-2">
-                          <h3 className="text-base font-bold text-white">Live Google Meet Capture Active</h3>
-                          <span className="px-2 py-0.5 text-[10px] font-mono font-bold uppercase tracking-wider text-rose-300 bg-rose-950/80 border border-rose-500/40 rounded-md animate-pulse">
-                            Recording in Progress
-                          </span>
-                        </div>
-                        <p className="text-xs text-slate-400 mt-0.5">
-                          Bot is connected to Google Meet ({meetingDetail.native_meeting_id || 'room'}). Live speech chunks are streaming via WebSocket into workspace memory.
-                        </p>
-                      </div>
-                    </div>
-
-                    {/* Step C4: End / Process Meeting Button */}
-                    <button
-                      onClick={() => handleStopLiveMeeting(meetingDetail.id)}
-                      disabled={stoppingLiveMeeting}
-                      className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-rose-600 via-rose-500 to-pink-600 hover:from-rose-500 hover:to-pink-500 text-white text-xs font-bold shadow-lg shadow-rose-500/25 flex items-center gap-2 cursor-pointer transition-all active:scale-95 shrink-0"
-                    >
-                      {stoppingLiveMeeting ? (
-                        <>
-                          <Loader2 className="w-4 h-4 animate-spin" />
-                          <span>Stopping & Triggering AI...</span>
-                        </>
-                      ) : (
-                        <>
-                          <Square className="w-4 h-4 fill-current" />
-                          <span>Leave / Process Meeting</span>
-                        </>
-                      )}
-                    </button>
-                  </div>
-
-                  {/* Live Streaming Transcript Card */}
-                  <div className="p-5 rounded-xl bg-[#18181b] border border-[#27272A] space-y-4">
-                    <div className="flex items-center justify-between border-b border-[#27272A] pb-3">
-                      <div className="flex items-center gap-2">
-                        <FileText className="w-4 h-4 text-[#8B5CF6]" />
-                        <h4 className="text-xs font-bold text-white uppercase tracking-wider">Live Transcript Stream</h4>
-                        <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 font-bold">
-                          Real-time Feed
-                        </span>
-                      </div>
-                      <span className="text-xs font-mono text-slate-400">
-                        {meetingTranscript?.length || 0} segments recorded
-                      </span>
-                    </div>
-
-                    {(!meetingTranscript || meetingTranscript.length === 0) ? (
-                      <div className="p-8 text-center border border-dashed border-[#27272A] rounded-xl space-y-2">
-                        <Loader2 className="w-6 h-6 text-[#8B5CF6] mx-auto animate-spin" />
-                        <p className="text-xs text-slate-300 font-medium">Waiting for meeting speech...</p>
-                        <p className="text-[11px] text-slate-500 max-w-sm mx-auto">
-                          As participants speak in the Google Meet call, diarized speech segments will appear here in real-time.
-                        </p>
-                      </div>
-                    ) : (
-                      <div className="max-h-[380px] overflow-y-auto space-y-3 pr-2 scrollbar-thin">
-                        {meetingTranscript.map((seg, idx) => (
-                          <div
-                            key={seg.id || idx}
-                            className="p-3.5 rounded-xl bg-[#111113] border border-[#27272A] flex items-start gap-3 hover:border-[#8B5CF6]/40 transition-colors animate-fadeIn"
-                          >
-                            <div className="w-8 h-8 rounded-full bg-gradient-to-tr from-[#8B5CF6] to-indigo-600 flex items-center justify-center text-xs font-bold text-white shrink-0 shadow-md">
-                              {seg.speaker.charAt(0).toUpperCase()}
-                            </div>
-                            <div className="space-y-1 flex-1 min-w-0">
-                              <div className="flex items-center justify-between text-xs">
-                                <span className="font-bold text-white">{seg.speaker}</span>
-                                <span className="font-mono text-[10px] text-slate-500">
-                                  {formatTimestampSeconds(seg.start_time)} - {formatTimestampSeconds(seg.end_time)}
-                                </span>
-                              </div>
-                              <p className="text-xs text-slate-300 leading-relaxed">{seg.text}</p>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                </div>
-              )}
-
-              {/* 1. Empty State (No meetings) */}
+              {/* Empty state if no meetings exist */}
               {(!meetings || meetings.length === 0) && (
-                <div className="p-12 rounded-2xl bg-[#111113] border border-dashed border-[#27272A] text-center space-y-4">
+                <div className="p-12 rounded-2xl bg-[#111113] border border-dashed border-[#27272A] text-center space-y-4 shadow-xl">
                   <FileText className="w-12 h-12 text-[#8B5CF6] mx-auto animate-bounce" />
                   <h3 className="text-lg font-bold text-white">No Meetings in this Workspace</h3>
                   <p className="text-xs text-slate-400 max-w-md mx-auto">
@@ -1756,14 +1623,14 @@ export const AppWorkspace: React.FC<AppWorkspaceProps> = ({ onBackToLanding }) =
                   <div className="flex items-center justify-center gap-3">
                     <button
                       onClick={() => setLiveMeetModalOpen(true)}
-                      className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white text-xs font-bold shadow-lg shadow-emerald-500/20 inline-flex items-center gap-2"
+                      className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white text-xs font-bold shadow-lg shadow-emerald-500/20 inline-flex items-center gap-2 cursor-pointer"
                     >
                       <Video className="w-4 h-4" />
                       <span>Join Live Google Meet</span>
                     </button>
                     <button
                       onClick={() => setUploadModalOpen(true)}
-                      className="px-5 py-2.5 rounded-xl bg-[#8B5CF6] hover:bg-[#7c3aed] text-white text-xs font-bold shadow-lg shadow-[#8B5CF6]/20 inline-flex items-center gap-2"
+                      className="px-5 py-2.5 rounded-xl bg-[#8B5CF6] hover:bg-[#7c3aed] text-white text-xs font-bold shadow-lg shadow-[#8B5CF6]/20 inline-flex items-center gap-2 cursor-pointer"
                     >
                       <Upload className="w-4 h-4" />
                       <span>Upload Audio</span>
@@ -1772,466 +1639,214 @@ export const AppWorkspace: React.FC<AppWorkspaceProps> = ({ onBackToLanding }) =
                 </div>
               )}
 
-              {/* 2. Queued State */}
-              {meetingDetail?.status === 'queued' && (
-                <div className="p-10 rounded-2xl bg-[#111113] border border-amber-500/30 text-center space-y-4">
-                  <Clock className="w-10 h-10 text-amber-400 mx-auto animate-pulse" />
-                  <h3 className="text-lg font-bold text-white">Meeting Queued in Celery Pipeline</h3>
-                  <p className="text-xs text-slate-400 max-w-md mx-auto">
-                    The recording is queued for worker assignment. Polling status automatically every 5 seconds...
-                  </p>
-                  <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-amber-500/10 text-amber-300 text-xs font-mono">
-                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                    <span>Polling status...</span>
-                  </div>
-                </div>
-              )}
-
-              {/* 3. Processing State */}
-              {meetingDetail?.status === 'processing' && (
-                <div className="p-10 rounded-2xl bg-[#111113] border border-[#8B5CF6]/40 text-center space-y-4">
-                  <RefreshCw className="w-10 h-10 text-[#8B5CF6] mx-auto animate-spin" />
-                  <h3 className="text-lg font-bold text-white">Transcribing & Analyzing with Gemini 2.0 Flash</h3>
-                  <p className="text-xs text-slate-400 max-w-md mx-auto">
-                    Speaker turns are being diarized, executive takeaways summarized, and action items extracted into PostgreSQL.
-                  </p>
-                  <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-[#8B5CF6]/10 text-[#8B5CF6] text-xs font-mono">
-                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                    <span>Processing in background (Polling every 5s)...</span>
-                  </div>
-                </div>
-              )}
-
-              {/* 4. Failed State */}
-              {meetingDetail?.status === 'failed' && (
-                <div className="p-10 rounded-2xl bg-rose-950/20 border border-rose-500/40 text-center space-y-4">
-                  <AlertCircle className="w-10 h-10 text-rose-400 mx-auto" />
-                  <h3 className="text-lg font-bold text-white">Meeting Processing Encountered an Issue</h3>
-                  <p className="text-xs text-rose-300 max-w-lg mx-auto leading-relaxed bg-rose-950/40 p-3 rounded-xl border border-rose-500/30">
-                    {meetingDetail.failure_reason || 'Google Gemini API rate limit / quota exceeded (429 Resource Exhausted). Please check your Gemini API plan or retry in a minute.'}
-                  </p>
-                  <div className="flex justify-center items-center gap-3 pt-2">
-                    <button
-                      onClick={async () => {
-                        try {
-                          await retryMeetingApi(meetingDetail.id, getToken);
-                          await mutateMeetingDetail();
-                          await mutateMeetings();
-                          showToast('Re-queued meeting in Celery pipeline for Gemini analysis!');
-                        } catch (err: any) {
-                          showToast(err.message || 'Failed to retry processing', 'error');
-                        }
-                      }}
-                      className="px-5 py-2.5 rounded-xl bg-[#8B5CF6] hover:bg-[#7c3aed] text-white text-xs font-bold shadow-lg shadow-[#8B5CF6]/20 flex items-center gap-2 cursor-pointer"
-                    >
-                      <RefreshCw className="w-3.5 h-3.5" />
-                      <span>Retry AI Processing</span>
-                    </button>
-                    <button
-                      onClick={() => setUploadModalOpen(true)}
-                      className="px-4 py-2.5 rounded-xl bg-[#18181b] hover:bg-[#27272A] border border-[#27272A] text-slate-300 text-xs font-bold transition-colors cursor-pointer"
-                    >
-                      Re-upload Audio
-                    </button>
-                    <button
-                      onClick={() => handleDeleteMeeting(meetingDetail.id, meetingDetail.title)}
-                      className="px-4 py-2.5 rounded-xl bg-rose-500/20 text-rose-300 hover:bg-rose-500/30 text-xs font-bold transition-colors cursor-pointer"
-                    >
-                      Delete
-                    </button>
-                  </div>
-                </div>
-              )}
-
-
-              {/* 5. Completed State Views */}
-              {meetingDetail?.status === 'completed' && (
+              {meetingDetail && (
                 <>
-                  {/* Interactive Audio Player Bar */}
-                  {selectedMeetingId && meetingDetail && (
-                    meetingDetail.audio_url ? (
-                      <div className="p-4 rounded-2xl bg-[#111113] border border-[#27272A] flex flex-col sm:flex-row items-center justify-between gap-4 shadow-xl">
-                        <audio
-                          ref={audioRef}
-                          src={getAudioStreamUrl(selectedMeetingId)}
-                          preload="metadata"
-                        />
+                  {/* Meeting Header */}
+                  <MeetingHeader
+                    meeting={meetingDetail}
+                    allMeetings={meetings || []}
+                    speakerStats={speakerStats}
+                    onSelectMeeting={(id) => setSelectedMeetingId(id)}
+                    onRenameMeeting={handleRenameMeeting}
+                    onDeleteMeeting={handleDeleteMeeting}
+                    onExportMarkdown={handleExportMarkdown}
+                    onExportJSON={handleExportJSON}
+                    onExportPDF={handleExportPDF}
+                  />
 
-                        <div className="flex items-center gap-3 w-full sm:w-auto">
-                          <button
-                            onClick={handleToggleAudio}
-                            className="w-10 h-10 rounded-full bg-[#8B5CF6] hover:bg-[#7c3aed] text-white flex items-center justify-center cursor-pointer shadow-lg shadow-[#8B5CF6]/30 transition-transform active:scale-95 shrink-0"
-                          >
-                            {isPlaying ? <Pause className="w-5 h-5" /> : <Play className="w-5 h-5 ml-0.5" />}
-                          </button>
+                  {/* Meeting At A Glance Strip */}
+                  {meetingDetail.status === 'completed' && (
+                    <MeetingAtAGlance
+                      durationSeconds={meetingDetail.duration_seconds}
+                      speakerStats={speakerStats}
+                      decisionsCount={meetingDecisions?.length || 0}
+                      tasksCount={meetingTasks?.length || 0}
+                      completedTasksCount={meetingTasks?.filter((t) => t.status === 'done').length || 0}
+                    />
+                  )}
 
-                          <div className="space-y-0.5">
-                            <div className="text-xs font-bold text-white">Meeting Audio Recording</div>
-                            <div className="text-[11px] font-mono text-slate-400">
-                              {formatTimestampSeconds(currentTime)} / {formatTimestampSeconds(audioDuration)}
-                            </div>
-                          </div>
-                        </div>
-
-                        {/* Seek Bar */}
-                        <div className="flex-1 w-full max-w-xl flex items-center gap-3">
-                          <input
-                            type="range"
-                            min={0}
-                            max={audioDuration || 100}
-                            value={currentTime}
-                            onChange={(e) => {
-                              const val = parseFloat(e.target.value);
-                              setCurrentTime(val);
-                              if (audioRef.current) audioRef.current.currentTime = val;
-                            }}
-                            className="w-full accent-[#8B5CF6] bg-[#18181b] h-1.5 rounded-lg cursor-pointer"
-                          />
-
-                          <button
-                            onClick={handleToggleMute}
-                            className="p-2 rounded-lg text-slate-400 hover:text-white transition-colors"
-                          >
-                            {isMuted ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}
-                          </button>
-                        </div>
-                      </div>
-                    ) : (
-                      <div className="p-4 rounded-2xl bg-[#111113] border border-[#27272A] flex items-center justify-between gap-3 text-xs shadow-xl">
+                  {/* Live Active Meeting View */}
+                  {meetingDetail.status === 'in_progress' && (
+                    <div className="p-6 rounded-2xl bg-[#111113] border border-rose-500/40 space-y-6 shadow-2xl shadow-rose-950/20">
+                      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 p-4 rounded-xl bg-gradient-to-r from-rose-950/40 via-[#18181b] to-slate-900 border border-rose-500/30">
                         <div className="flex items-center gap-3">
-                          <div className="w-9 h-9 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 flex items-center justify-center font-bold shrink-0">
-                            <Check className="w-4 h-4" />
+                          <div className="relative flex items-center justify-center w-10 h-10 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-400">
+                            <Radio className="w-5 h-5 animate-pulse" />
+                            <span className="absolute -top-1 -right-1 w-3 h-3 bg-rose-500 rounded-full border-2 border-[#111113] animate-ping" />
                           </div>
                           <div>
-                            <div className="font-bold text-white flex items-center gap-2">
-                              <span>Live Meeting Intelligence Complete</span>
-                              <span className="px-1.5 py-0.2 bg-emerald-950/80 border border-emerald-500/40 text-emerald-300 rounded text-[9px] font-mono uppercase">
-                                Live Session
+                            <div className="flex items-center gap-2">
+                              <h3 className="text-base font-bold text-white">Live Google Meet Capture Active</h3>
+                              <span className="px-2 py-0.5 text-[10px] font-mono font-bold uppercase tracking-wider text-rose-300 bg-rose-950/80 border border-rose-500/40 rounded-md animate-pulse">
+                                Live Ingestion
                               </span>
                             </div>
-                            <p className="text-[11px] text-slate-400 mt-0.5">
-                              Google Gemini has synthesized the live meeting into the summary, tasks, decisions, and interactive chat below.
+                            <p className="text-xs text-slate-400 mt-0.5">
+                              Bot is connected to Google Meet ({meetingDetail.native_meeting_id || 'call'}). Real-time speech turns stream directly into memory.
                             </p>
                           </div>
                         </div>
-                        <span className="font-mono text-emerald-400 text-xs font-bold shrink-0">
-                          {formatDuration(meetingDetail.duration_seconds)}
-                        </span>
-                      </div>
-                    )
-                  )}
 
-                  {/* Sub-tab 1: SUMMARY & DECISIONS */}
-                  {meetingSubTab === 'summary' && (
-                    <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-                      {/* Executive Overview (7 cols) */}
-                      <div className="lg:col-span-7 p-6 rounded-2xl bg-[#111113] border border-[#27272A] space-y-4">
-                        <h3 className="text-sm font-bold text-white uppercase tracking-wider">Executive Summary</h3>
-                        <p className="text-xs sm:text-sm text-slate-300 leading-relaxed bg-[#18181b] p-4 rounded-xl border border-[#27272A]">
-                          {meetingSummary?.overview || 'Summary generation is complete.'}
-                        </p>
-
-                        <div className="space-y-2 pt-2">
-                          <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider">Key Takeaways</h4>
-                          {meetingSummary?.key_takeaways && meetingSummary.key_takeaways.length > 0 ? (
-                            <ul className="space-y-2">
-                              {meetingSummary.key_takeaways.map((item, idx) => (
-                                <li
-                                  key={idx}
-                                  className="flex items-start gap-2 text-xs text-slate-300 bg-[#18181b] p-3 rounded-xl border border-[#27272A]"
-                                >
-                                  <Check className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
-                                  <span>{item}</span>
-                                </li>
-                              ))}
-                            </ul>
-                          ) : (
-                            <p className="text-xs text-slate-500 italic">No explicit key takeaways noted.</p>
-                          )}
-                        </div>
-
-                        {meetingSummary?.next_steps && meetingSummary.next_steps.length > 0 && (
-                          <div className="space-y-2 pt-2">
-                            <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider">Next Steps</h4>
-                            <ul className="space-y-2">
-                              {meetingSummary.next_steps.map((item, idx) => (
-                                <li
-                                  key={idx}
-                                  className="flex items-start gap-2 text-xs text-slate-300 bg-[#18181b] p-3 rounded-xl border border-[#27272A]"
-                                >
-                                  <ChevronRight className="w-4 h-4 text-[#8B5CF6] shrink-0 mt-0.5" />
-                                  <span>{item}</span>
-                                </li>
-                              ))}
-                            </ul>
-                          </div>
-                        )}
-                      </div>
-
-                      {/* Logged Decisions (5 cols) */}
-                      <div className="lg:col-span-5 p-6 rounded-2xl bg-[#111113] border border-[#27272A] space-y-4">
-                        <h3 className="text-sm font-bold text-white uppercase tracking-wider">Consensus Decisions</h3>
-                        {meetingDecisions && meetingDecisions.length > 0 ? (
-                          <div className="space-y-3">
-                            {meetingDecisions.map((d) => (
-                              <div key={d.id} className="p-4 rounded-xl bg-[#18181b] border border-[#27272A] space-y-1">
-                                <div className="flex items-center justify-between text-xs">
-                                  <span className="font-bold text-[#8B5CF6]">{d.topic}</span>
-                                  {d.transcript_timestamp && (
-                                    <button
-                                      onClick={() => {
-                                        const [m, s] = d.transcript_timestamp!.split(':').map(Number);
-                                        if (!isNaN(m)) handleSeekToTime((m * 60) + (s || 0));
-                                      }}
-                                      className="text-[10px] font-mono text-slate-400 hover:text-white bg-[#27272A] px-1.5 py-0.5 rounded cursor-pointer"
-                                    >
-                                      @{d.transcript_timestamp}
-                                    </button>
-                                  )}
-                                </div>
-                                <p className="text-xs text-slate-300 leading-relaxed">{d.outcome}</p>
-                              </div>
-                            ))}
-                          </div>
-                        ) : (
-                          <p className="text-xs text-slate-500 italic">No formal decisions detected in this meeting.</p>
-                        )}
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Sub-tab 2: DIARIZED TRANSCRIPT */}
-                  {meetingSubTab === 'transcript' && (
-                    <div className="p-6 rounded-2xl bg-[#111113] border border-[#27272A] space-y-4">
-                      <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-3 border-b border-[#27272A] gap-2">
-                        <div className="flex items-center gap-2.5">
-                          <h3 className="text-sm font-bold text-white uppercase tracking-wider">
-                            Audio Diarized Transcript ({meetingTranscript?.length || 0} Segments)
-                          </h3>
-                          {meetingDetail && meetingDetail.duration_seconds > 900 && (
-                            <span className="px-2 py-0.5 rounded-full text-[10px] font-mono font-bold bg-[#8B5CF6]/20 text-[#8B5CF6] border border-[#8B5CF6]/30 flex items-center gap-1">
-                              <span>Long Recording (&gt;15m)</span>
-                              <span className="text-slate-400">• Speaker Continuity Enabled</span>
-                            </span>
-                          )}
-
-                        </div>
-                        <span className="text-xs text-slate-500 font-mono">Click timestamp to seek audio</span>
-                      </div>
-
-
-                      {meetingTranscript && meetingTranscript.length > 0 ? (
-                        <div className="space-y-3 max-h-[600px] overflow-y-auto pr-2">
-                          {meetingTranscript.map((tr) => (
-                            <div
-                              key={tr.id}
-                              className="p-4 rounded-xl bg-[#18181b] border border-[#27272A] space-y-2 hover:border-[#8B5CF6]/40 transition-colors"
-                            >
-                              <div className="flex items-center justify-between text-xs">
-                                <div className="flex items-center gap-2">
-                                  <img
-                                    src={getAvatar(tr.speaker)}
-                                    alt={tr.speaker}
-                                    className="w-6 h-6 rounded-full object-cover"
-                                  />
-                                  <span className="font-bold text-white">{tr.speaker}</span>
-                                </div>
-                                <button
-                                  onClick={() => handleSeekToTime(tr.start_time)}
-                                  className="text-[10px] font-mono text-[#8B5CF6] hover:text-white bg-[#8B5CF6]/10 px-2 py-0.5 rounded cursor-pointer transition-colors"
-                                  title="Jump audio to this second"
-                                >
-                                  @{formatTimestampSeconds(tr.start_time)}
-                                </button>
-                              </div>
-                              <p className="text-xs text-slate-300 leading-relaxed">{tr.text}</p>
-                            </div>
-                          ))}
-                        </div>
-                      ) : (
-                        <p className="text-xs text-slate-500 italic">No transcript segments available.</p>
-                      )}
-                    </div>
-                  )}
-
-                  {/* Sub-tab 3: ACTION ITEMS FOR MEETING */}
-                  {meetingSubTab === 'tasks' && (
-                    <div className="p-6 rounded-2xl bg-[#111113] border border-[#27272A] space-y-4">
-                      <div className="flex items-center justify-between pb-3 border-b border-[#27272A]">
-                        <h3 className="text-sm font-bold text-white uppercase tracking-wider">
-                          Extracted Action Items ({meetingTasks?.length || 0})
-                        </h3>
-                        <button onClick={() => setActiveTab('kanban')} className="text-xs text-[#8B5CF6] hover:underline">
-                          Open Kanban Board
-                        </button>
-                      </div>
-
-                      {meetingTasks && meetingTasks.length > 0 ? (
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                          {meetingTasks.map((t) => (
-                            <div key={t.id} className="p-4 rounded-xl bg-[#18181b] border border-[#27272A] space-y-3">
-                              <div className="flex items-start justify-between gap-2">
-                                <span className="text-xs font-bold text-white">{t.title}</span>
-                                <div className="flex items-center gap-2">
-                                  <span
-                                    className={`text-[9px] font-mono uppercase px-2 py-0.5 rounded font-bold ${
-                                      t.priority === 'high'
-                                        ? 'bg-rose-500/20 text-rose-300'
-                                        : t.priority === 'medium'
-                                        ? 'bg-amber-500/20 text-amber-300'
-                                        : 'bg-blue-500/20 text-blue-300'
-                                    }`}
-                                  >
-                                    {t.priority}
-                                  </span>
-                                  <button
-                                    onClick={() => handleDeleteTask(t.id, t.title)}
-                                    title="Delete Action Item"
-                                    className="p-1 rounded text-slate-500 hover:text-rose-400 hover:bg-rose-500/10 transition-colors cursor-pointer"
-                                  >
-                                    <Trash2 className="w-3.5 h-3.5" />
-                                  </button>
-                                </div>
-                              </div>
-
-                              <div className="flex items-center justify-between pt-2 border-t border-[#27272A] text-xs text-slate-400">
-                                <span>Assignee: {t.assignee_name || 'Unassigned'}</span>
-                                <span className="font-mono text-slate-500">Due: {t.due_date || 'This Week'}</span>
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                      ) : (
-                        <p className="text-xs text-slate-500 italic">No action items extracted for this meeting.</p>
-                      )}
-                    </div>
-                  )}
-
-                  {/* Sub-tab 4: AI ASSISTANT CHAT */}
-                  {meetingSubTab === 'chat' && (
-                    <div className="p-6 rounded-2xl bg-[#111113] border border-[#27272A] space-y-4 flex flex-col h-[520px]">
-                      <div className="flex items-center justify-between pb-3 border-b border-[#27272A]">
-                        <div className="flex items-center gap-2">
-                          <Sparkles className="w-4 h-4 text-[#8B5CF6]" />
-                          <h3 className="text-sm font-bold text-white uppercase tracking-wider">
-                            AI Assistant for {meetingDetail.title}
-                          </h3>
-                        </div>
-                        <span className="text-[10px] font-mono text-emerald-400">Grounded in meeting embeddings</span>
-                      </div>
-
-                      {/* Chat messages list */}
-                      <div className="flex-1 overflow-y-auto space-y-3 pr-2">
-                        {localChatMessages.length === 0 && (
-                          <div className="p-4 rounded-xl bg-[#18181b] text-xs text-slate-400 border border-[#27272A]">
-                            Ask questions like "Who agreed to lead auth?", "What were the major decisions?", or "What are the deadlines?"
-                          </div>
-                        )}
-
-                        {localChatMessages.map((msg, idx) => (
-                          <div
-                            key={msg.id || idx}
-                            className={`flex flex-col ${msg.role === 'user' ? 'items-end' : 'items-start'}`}
-                          >
-                            <div
-                              className={`p-3.5 rounded-2xl max-w-lg text-xs leading-relaxed ${
-                                msg.role === 'user'
-                                  ? 'bg-[#8B5CF6] text-white rounded-br-none'
-                                  : 'bg-[#18181b] border border-[#27272A] text-slate-200 rounded-bl-none space-y-1'
-                              }`}
-                            >
-                              <p>{msg.content}</p>
-                              {msg.cited_timestamp && (
-                                <button
-                                  onClick={() => {
-                                    const [m, s] = msg.cited_timestamp!.split(':').map(Number);
-                                    if (!isNaN(m)) handleSeekToTime((m * 60) + (s || 0));
-                                  }}
-                                  className="text-[10px] text-[#8B5CF6] font-mono pt-1 hover:underline cursor-pointer block"
-                                >
-                                  Citation timestamp: @{msg.cited_timestamp} (Click to listen)
-                                </button>
-                              )}
-                            </div>
-                          </div>
-                        ))}
-
-                        {sendingChat && (
-                          <div className="flex items-center gap-2 text-xs text-slate-400 italic">
-                            <Loader2 className="w-3.5 h-3.5 animate-spin text-[#8B5CF6]" />
-                            <span>Synthesizing answer from audio transcript & embeddings...</span>
-                          </div>
-                        )}
-                      </div>
-
-                      {/* Chat Input Form */}
-                      <form onSubmit={handleSendChat} className="flex items-center gap-2 pt-2 border-t border-[#27272A]">
-                        <input
-                          type="text"
-                          placeholder="Ask anything about decisions, action items, or agreement..."
-                          value={chatInput}
-                          onChange={(e) => setChatInput(e.target.value)}
-                          className="flex-1 bg-[#18181b] border border-[#27272A] rounded-xl px-4 py-2.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-[#8B5CF6]"
-                        />
                         <button
-                          type="submit"
-                          disabled={!chatInput.trim() || sendingChat}
-                          className="px-4 py-2.5 rounded-xl bg-[#8B5CF6] hover:bg-[#7c3aed] disabled:opacity-40 text-white text-xs font-bold flex items-center gap-1.5 cursor-pointer shadow-lg shadow-[#8B5CF6]/20 transition-colors"
+                          onClick={() => handleStopLiveMeeting(meetingDetail.id)}
+                          disabled={stoppingLiveMeeting}
+                          className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-rose-600 via-rose-500 to-pink-600 hover:from-rose-500 hover:to-pink-500 text-white text-xs font-bold shadow-lg shadow-rose-500/25 flex items-center gap-2 cursor-pointer transition-all active:scale-95 shrink-0"
                         >
-                          <Send className="w-3.5 h-3.5" />
-                          <span>Send</span>
+                          {stoppingLiveMeeting ? (
+                            <>
+                              <Loader2 className="w-4 h-4 animate-spin" />
+                              <span>Stopping & Triggering AI...</span>
+                            </>
+                          ) : (
+                            <>
+                              <Square className="w-4 h-4 fill-current" />
+                              <span>Leave / Process Meeting</span>
+                            </>
+                          )}
                         </button>
-                      </form>
+                      </div>
+
+                      {/* Live Diarized Turns Feed */}
+                      <DiarizedTranscript
+                        segments={meetingTranscript || []}
+                        speakerStats={speakerStats}
+                        currentTime={currentTime}
+                        onSeek={handleSeekToTime}
+                        isLongRecording={false}
+                      />
                     </div>
                   )}
 
-                  {/* Quick Add Task Field at the bottom of Meeting Details view */}
-                  <div className="p-5 rounded-2xl bg-[#111113] border border-[#27272A] space-y-3 shadow-xl">
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-2 text-xs font-bold text-white uppercase tracking-wider">
-                        <Plus className="w-4 h-4 text-[#8B5CF6]" />
-                        <span>Quick Add Action Item</span>
+                  {/* Queued / Processing State Card */}
+                  {(meetingDetail.status === 'queued' || meetingDetail.status === 'processing') && (
+                    <ProcessingStateCard
+                      status={meetingDetail.status}
+                      meetingTitle={meetingDetail.title}
+                    />
+                  )}
+
+                  {/* Failed Meeting Error Card */}
+                  {meetingDetail.status === 'failed' && (
+                    <MeetingErrorCard
+                      meetingId={meetingDetail.id}
+                      meetingTitle={meetingDetail.title}
+                      failureReason={meetingDetail.failure_reason}
+                      onRetry={handleRetryMeeting}
+                      onOpenUpload={() => setUploadModalOpen(true)}
+                      onDelete={() => handleDeleteMeeting(meetingDetail.id, meetingDetail.title)}
+                    />
+                  )}
+
+                  {/* Completed Meeting Intelligence Hub */}
+                  {meetingDetail.status === 'completed' && (
+                    <div className="space-y-6">
+                      {/* Interactive Audio Player */}
+                      {selectedMeetingId && meetingDetail.audio_url && (
+                        <MeetingAudioPlayer
+                          audioUrl={getAudioStreamUrl(selectedMeetingId)}
+                          fallbackDuration={meetingDetail.duration_seconds}
+                          currentTime={currentTime}
+                          onTimeUpdate={(t) => setCurrentTime(t)}
+                          onSeek={handleSeekToTime}
+                          audioRef={audioRef}
+                        />
+                      )}
+
+                      {/* Sub-Tab Navigation Strip */}
+                      <div className="flex items-center gap-2 p-1.5 rounded-2xl bg-[#111113] border border-[#27272A] overflow-x-auto">
+                        <button
+                          onClick={() => setMeetingSubTab('summary')}
+                          className={`px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-2 ${
+                            meetingSubTab === 'summary'
+                              ? 'bg-[#8B5CF6] text-white shadow-lg shadow-[#8B5CF6]/25'
+                              : 'text-slate-400 hover:text-white hover:bg-[#18181b]'
+                          }`}
+                        >
+                          <Sparkles className="w-3.5 h-3.5" />
+                          <span>Executive Summary & Decisions</span>
+                        </button>
+
+                        <button
+                          onClick={() => setMeetingSubTab('transcript')}
+                          className={`px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-2 ${
+                            meetingSubTab === 'transcript'
+                              ? 'bg-[#8B5CF6] text-white shadow-lg shadow-[#8B5CF6]/25'
+                              : 'text-slate-400 hover:text-white hover:bg-[#18181b]'
+                          }`}
+                        >
+                          <FileText className="w-3.5 h-3.5" />
+                          <span>Diarized Transcript ({meetingTranscript?.length || 0})</span>
+                        </button>
+
+                        <button
+                          onClick={() => setMeetingSubTab('tasks')}
+                          className={`px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-2 ${
+                            meetingSubTab === 'tasks'
+                              ? 'bg-[#8B5CF6] text-white shadow-lg shadow-[#8B5CF6]/25'
+                              : 'text-slate-400 hover:text-white hover:bg-[#18181b]'
+                          }`}
+                        >
+                          <CheckCircle2 className="w-3.5 h-3.5" />
+                          <span>Action Items ({meetingTasks?.length || 0})</span>
+                        </button>
+
+                        <button
+                          onClick={() => setMeetingSubTab('chat')}
+                          className={`px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-2 ${
+                            meetingSubTab === 'chat'
+                              ? 'bg-[#8B5CF6] text-white shadow-lg shadow-[#8B5CF6]/25'
+                              : 'text-slate-400 hover:text-white hover:bg-[#18181b]'
+                          }`}
+                        >
+                          <Bot className="w-3.5 h-3.5 text-indigo-300" />
+                          <span>AI Assistant Chat</span>
+                        </button>
                       </div>
-                      <span className="text-[10px] text-slate-500 font-mono">Live PostgreSQL persistence</span>
+
+                      {/* Sub-Tab 1: Executive Intelligence & Decisions */}
+                      {meetingSubTab === 'summary' && (
+                        <ExecutiveIntelligence
+                          summary={meetingSummary}
+                          decisions={meetingDecisions || []}
+                          onSeek={handleSeekToTime}
+                        />
+                      )}
+
+                      {/* Sub-Tab 2: Diarized Synchronized Transcript */}
+                      {meetingSubTab === 'transcript' && (
+                        <DiarizedTranscript
+                          segments={meetingTranscript || []}
+                          speakerStats={speakerStats}
+                          currentTime={currentTime}
+                          onSeek={handleSeekToTime}
+                          isLongRecording={Boolean(meetingDetail.duration_seconds && meetingDetail.duration_seconds > 900)}
+                        />
+                      )}
+
+                      {/* Sub-Tab 3: Action Items */}
+                      {meetingSubTab === 'tasks' && (
+                        <ActionItemsView
+                          tasks={meetingTasks || []}
+                          onUpdateTaskStatus={handleUpdateTaskStatus}
+                          onDeleteTask={handleDeleteTask}
+                          onAddTask={handleAddMeetingTask}
+                          onSeek={handleSeekToTime}
+                          onOpenKanban={() => setActiveTab('kanban')}
+                        />
+                      )}
+
+                      {/* Sub-Tab 4: AI Assistant Chat */}
+                      {meetingSubTab === 'chat' && (
+                        <MeetingAssistantChat
+                          meetingTitle={meetingDetail.title}
+                          messages={localChatMessages}
+                          isSending={sendingChat}
+                          onSendMessage={handleSendChatDirect}
+                          onSeek={handleSeekToTime}
+                        />
+                      )}
                     </div>
-
-                    <form onSubmit={handleQuickAddTask} className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
-                      <input
-                        type="text"
-                        placeholder="Task description (e.g. Implement OAuth 2.1 PKCE token revocation in Redis)"
-                        value={quickTaskTitle}
-                        onChange={(e) => setQuickTaskTitle(e.target.value)}
-                        className="flex-1 bg-[#18181b] border border-[#27272A] rounded-xl px-4 py-2.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-[#8B5CF6]"
-                      />
-
-                      <input
-                        type="text"
-                        placeholder="Assignee (e.g. Sarah Chen)"
-                        value={quickTaskAssignee}
-                        onChange={(e) => setQuickTaskAssignee(e.target.value)}
-                        className="w-40 bg-[#18181b] border border-[#27272A] rounded-xl px-3 py-2.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-[#8B5CF6]"
-                      />
-
-                      <select
-                        value={quickTaskPriority}
-                        onChange={(e) => setQuickTaskPriority(e.target.value as TaskPriority)}
-                        className="bg-[#18181b] border border-[#27272A] rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-[#8B5CF6] cursor-pointer shrink-0"
-                      >
-                        <option value="high">High Priority</option>
-                        <option value="medium">Medium Priority</option>
-                        <option value="low">Low Priority</option>
-                      </select>
-
-                      <button
-                        type="submit"
-                        disabled={!quickTaskTitle.trim() || addingTask}
-                        className="px-5 py-2.5 rounded-xl bg-[#8B5CF6] hover:bg-[#7c3aed] disabled:opacity-40 text-white text-xs font-bold flex items-center justify-center gap-1.5 cursor-pointer shadow-lg shadow-[#8B5CF6]/20 shrink-0 transition-colors"
-                      >
-                        <Plus className="w-4 h-4" />
-                        <span>{addingTask ? 'Saving...' : 'Add Task'}</span>
-                      </button>
-                    </form>
-                  </div>
+                  )}
                 </>
               )}
             </div>
@@ -2439,9 +2054,9 @@ export const AppWorkspace: React.FC<AppWorkspaceProps> = ({ onBackToLanding }) =
                     Speaker Turn Distribution {meetingDetail?.title ? `(${meetingDetail.title})` : ''}
                   </h3>
 
-                  {speakerStats.length > 0 ? (
+                  {analyticsSpeakerStats.length > 0 ? (
                     <div className="space-y-3 pt-2">
-                      {speakerStats.map((stat, idx) => (
+                      {analyticsSpeakerStats.map((stat, idx) => (
                         <div key={idx} className="space-y-1">
                           <div className="flex justify-between text-xs">
                             <span className="text-slate-300 font-semibold">{stat.speaker}</span>
