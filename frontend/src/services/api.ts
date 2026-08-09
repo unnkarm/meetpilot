@@ -122,9 +122,13 @@ export function useMeetingDetail(meetingId?: string | null, getToken?: () => Pro
     createTokenFetcher(getToken),
     {
       refreshInterval: (latestData) => {
-        // Poll every 5 seconds if meeting is queued or processing
-        if (latestData?.status === 'queued' || latestData?.status === 'processing') {
-          return 5000;
+        // Poll every 3 seconds if meeting is in_progress, queued or processing
+        if (
+          latestData?.status === 'in_progress' ||
+          latestData?.status === 'queued' ||
+          latestData?.status === 'processing'
+        ) {
+          return 3000;
         }
         return 0;
       },
@@ -144,7 +148,10 @@ export function useMeetingTranscript(meetingId?: string | null, isProcessing = f
   return useSWR<ApiTranscriptSegment[]>(
     meetingId && meetingId !== 'empty' && !isProcessing ? `/api/v1/meetings/${meetingId}/transcript` : null,
     createTokenFetcher(getToken),
-    { shouldRetryOnError: false }
+    {
+      refreshInterval: 2500,
+      shouldRetryOnError: false,
+    }
   );
 }
 
@@ -524,6 +531,39 @@ export async function importZoomRecordingApi(
         download_url: downloadUrl,
         file_type: fileType,
       }),
+    },
+    getToken
+  );
+}
+
+export async function startLiveMeeting(
+  workspaceId: string,
+  meetingUrl: string,
+  title?: string,
+  getToken?: () => Promise<string | null>
+): Promise<ApiMeetingDetail> {
+  return apiFetch<ApiMeetingDetail>(
+    '/api/v1/meetings/live/start',
+    {
+      method: 'POST',
+      body: JSON.stringify({
+        workspace_id: workspaceId,
+        meeting_url: meetingUrl,
+        title: title || undefined,
+      }),
+    },
+    getToken
+  );
+}
+
+export async function stopLiveMeeting(
+  meetingId: string,
+  getToken?: () => Promise<string | null>
+): Promise<ApiMeetingDetail> {
+  return apiFetch<ApiMeetingDetail>(
+    `/api/v1/meetings/live/${meetingId}/stop`,
+    {
+      method: 'POST',
     },
     getToken
   );

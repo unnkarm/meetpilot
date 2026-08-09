@@ -49,6 +49,7 @@ import {
   Printer,
   Radio,
   FileCode,
+  Video,
 } from 'lucide-react';
 
 import { useUser, useClerk, useAuth } from '@clerk/clerk-react';
@@ -95,17 +96,17 @@ import {
   updateMeetingApi,
   retryMeetingApi,
   deleteWorkspaceApi,
-
-
   setupDiscordWebhookApi,
   disconnectIntegrationApi,
   getGoogleAuthUrlApi,
   getZoomAuthUrlApi,
   fetchZoomRecordingsApi,
   importZoomRecordingApi,
+  stopLiveMeeting,
   ZoomCloudRecording,
   setClerkUserContext,
 } from '../services/api';
+import { LiveMeetingModal } from './LiveMeetingModal';
 
 
 
@@ -189,6 +190,10 @@ export const AppWorkspace: React.FC<AppWorkspaceProps> = ({ onBackToLanding }) =
   const [uploadFile, setUploadFile] = useState<File | null>(null);
   const [uploading, setUploading] = useState(false);
   const [uploadProgressMsg, setUploadProgressMsg] = useState('');
+
+  // Step C1 & C3: Live Google Meet Capture & Legal Consent State
+  const [liveMeetModalOpen, setLiveMeetModalOpen] = useState(false);
+  const [stoppingLiveMeeting, setStoppingLiveMeeting] = useState(false);
 
   // Step B1: In-Browser Live Microphone Recording State
   const [recordModalOpen, setRecordModalOpen] = useState(false);
@@ -554,6 +559,21 @@ export const AppWorkspace: React.FC<AppWorkspaceProps> = ({ onBackToLanding }) =
     setRecordModalOpen(false);
     setRecordingSeconds(0);
     setRecordError(null);
+  };
+
+  // Step C4: End / Stop Live Meeting Bot and trigger Celery pipeline
+  const handleStopLiveMeeting = async (meetingId: string) => {
+    setStoppingLiveMeeting(true);
+    try {
+      await stopLiveMeeting(meetingId, getToken);
+      await mutateMeetings();
+      await mutateMeetingDetail();
+      showToast('Live Google Meet capture concluded! Processing summary, tasks, decisions & embeddings...');
+    } catch (err: any) {
+      showToast(err.message || 'Failed to stop live meeting bot', 'error');
+    } finally {
+      setStoppingLiveMeeting(false);
+    }
   };
 
   // Step B2: Export Meeting to Markdown (.md)
@@ -1067,7 +1087,19 @@ export const AppWorkspace: React.FC<AppWorkspaceProps> = ({ onBackToLanding }) =
         </div>
 
         {/* Right Header Navigation & Actions */}
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2 sm:gap-3">
+          {/* Step C1: Join Live Google Meet Button */}
+          <button
+            onClick={() => setLiveMeetModalOpen(true)}
+            className="px-3.5 py-1.5 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white text-xs font-bold flex items-center gap-1.5 cursor-pointer shadow-lg shadow-emerald-500/20 transition-all active:scale-95 border border-emerald-400/30"
+          >
+            <Video className="w-3.5 h-3.5" />
+            <span className="hidden sm:inline">Join Google Meet</span>
+            <span className="inline-flex items-center px-1.5 py-0.2 text-[9px] font-bold uppercase tracking-wider bg-emerald-950/80 border border-emerald-400/40 rounded-md text-emerald-300">
+              Live
+            </span>
+          </button>
+
           {/* Live Mic Recording Button */}
           <button
             onClick={() => {
@@ -1078,7 +1110,7 @@ export const AppWorkspace: React.FC<AppWorkspaceProps> = ({ onBackToLanding }) =
           >
             <span className="w-2 h-2 rounded-full bg-rose-500 animate-pulse" />
             <Mic className="w-3.5 h-3.5 text-rose-400" />
-            <span className="hidden sm:inline">Record Live</span>
+            <span className="hidden sm:inline">Record Mic</span>
           </button>
 
           {/* Quick Upload Button */}
@@ -1620,21 +1652,123 @@ export const AppWorkspace: React.FC<AppWorkspaceProps> = ({ onBackToLanding }) =
 
               {/* REAL-WORLD STATES FOR MEETING DETAIL */}
 
+              {/* 0. Step C2 & C4: Live Capture View (in_progress) */}
+              {meetingDetail?.status === 'in_progress' && (
+                <div className="p-6 rounded-2xl bg-[#111113] border border-rose-500/40 space-y-6 animate-fadeIn shadow-2xl shadow-rose-950/20">
+                  {/* Live Status Header */}
+                  <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 p-4 rounded-xl bg-gradient-to-r from-rose-950/40 via-[#18181b] to-slate-900 border border-rose-500/30">
+                    <div className="flex items-center gap-3">
+                      <div className="relative flex items-center justify-center w-10 h-10 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-400">
+                        <Radio className="w-5 h-5 animate-pulse" />
+                        <span className="absolute -top-1 -right-1 w-3 h-3 bg-rose-500 rounded-full border-2 border-[#111113] animate-ping" />
+                      </div>
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <h3 className="text-base font-bold text-white">Live Google Meet Capture Active</h3>
+                          <span className="px-2 py-0.5 text-[10px] font-mono font-bold uppercase tracking-wider text-rose-300 bg-rose-950/80 border border-rose-500/40 rounded-md animate-pulse">
+                            Recording in Progress
+                          </span>
+                        </div>
+                        <p className="text-xs text-slate-400 mt-0.5">
+                          Bot is connected to Google Meet ({meetingDetail.native_meeting_id || 'room'}). Live speech chunks are streaming via WebSocket into workspace memory.
+                        </p>
+                      </div>
+                    </div>
+
+                    {/* Step C4: End / Process Meeting Button */}
+                    <button
+                      onClick={() => handleStopLiveMeeting(meetingDetail.id)}
+                      disabled={stoppingLiveMeeting}
+                      className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-rose-600 via-rose-500 to-pink-600 hover:from-rose-500 hover:to-pink-500 text-white text-xs font-bold shadow-lg shadow-rose-500/25 flex items-center gap-2 cursor-pointer transition-all active:scale-95 shrink-0"
+                    >
+                      {stoppingLiveMeeting ? (
+                        <>
+                          <Loader2 className="w-4 h-4 animate-spin" />
+                          <span>Stopping & Triggering AI...</span>
+                        </>
+                      ) : (
+                        <>
+                          <Square className="w-4 h-4 fill-current" />
+                          <span>Leave / Process Meeting</span>
+                        </>
+                      )}
+                    </button>
+                  </div>
+
+                  {/* Live Streaming Transcript Card */}
+                  <div className="p-5 rounded-xl bg-[#18181b] border border-[#27272A] space-y-4">
+                    <div className="flex items-center justify-between border-b border-[#27272A] pb-3">
+                      <div className="flex items-center gap-2">
+                        <FileText className="w-4 h-4 text-[#8B5CF6]" />
+                        <h4 className="text-xs font-bold text-white uppercase tracking-wider">Live Transcript Stream</h4>
+                        <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 font-bold">
+                          Real-time Feed
+                        </span>
+                      </div>
+                      <span className="text-xs font-mono text-slate-400">
+                        {meetingTranscript?.length || 0} segments recorded
+                      </span>
+                    </div>
+
+                    {(!meetingTranscript || meetingTranscript.length === 0) ? (
+                      <div className="p-8 text-center border border-dashed border-[#27272A] rounded-xl space-y-2">
+                        <Loader2 className="w-6 h-6 text-[#8B5CF6] mx-auto animate-spin" />
+                        <p className="text-xs text-slate-300 font-medium">Waiting for meeting speech...</p>
+                        <p className="text-[11px] text-slate-500 max-w-sm mx-auto">
+                          As participants speak in the Google Meet call, diarized speech segments will appear here in real-time.
+                        </p>
+                      </div>
+                    ) : (
+                      <div className="max-h-[380px] overflow-y-auto space-y-3 pr-2 scrollbar-thin">
+                        {meetingTranscript.map((seg, idx) => (
+                          <div
+                            key={seg.id || idx}
+                            className="p-3.5 rounded-xl bg-[#111113] border border-[#27272A] flex items-start gap-3 hover:border-[#8B5CF6]/40 transition-colors animate-fadeIn"
+                          >
+                            <div className="w-8 h-8 rounded-full bg-gradient-to-tr from-[#8B5CF6] to-indigo-600 flex items-center justify-center text-xs font-bold text-white shrink-0 shadow-md">
+                              {seg.speaker.charAt(0).toUpperCase()}
+                            </div>
+                            <div className="space-y-1 flex-1 min-w-0">
+                              <div className="flex items-center justify-between text-xs">
+                                <span className="font-bold text-white">{seg.speaker}</span>
+                                <span className="font-mono text-[10px] text-slate-500">
+                                  {formatTimestampSeconds(seg.start_time)} - {formatTimestampSeconds(seg.end_time)}
+                                </span>
+                              </div>
+                              <p className="text-xs text-slate-300 leading-relaxed">{seg.text}</p>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+
               {/* 1. Empty State (No meetings) */}
               {(!meetings || meetings.length === 0) && (
                 <div className="p-12 rounded-2xl bg-[#111113] border border-dashed border-[#27272A] text-center space-y-4">
                   <FileText className="w-12 h-12 text-[#8B5CF6] mx-auto animate-bounce" />
                   <h3 className="text-lg font-bold text-white">No Meetings in this Workspace</h3>
                   <p className="text-xs text-slate-400 max-w-md mx-auto">
-                    Upload an MP3, WAV, or M4A recording to trigger Google Gemini speech diarization, automated summarization, and action item detection.
+                    Upload an MP3, WAV, or M4A recording or join a live Google Meet to trigger speech diarization, automated summarization, and action item detection.
                   </p>
-                  <button
-                    onClick={() => setUploadModalOpen(true)}
-                    className="px-5 py-2.5 rounded-xl bg-[#8B5CF6] hover:bg-[#7c3aed] text-white text-xs font-bold shadow-lg shadow-[#8B5CF6]/20 inline-flex items-center gap-2"
-                  >
-                    <Upload className="w-4 h-4" />
-                    <span>Upload First Meeting</span>
-                  </button>
+                  <div className="flex items-center justify-center gap-3">
+                    <button
+                      onClick={() => setLiveMeetModalOpen(true)}
+                      className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white text-xs font-bold shadow-lg shadow-emerald-500/20 inline-flex items-center gap-2"
+                    >
+                      <Video className="w-4 h-4" />
+                      <span>Join Live Google Meet</span>
+                    </button>
+                    <button
+                      onClick={() => setUploadModalOpen(true)}
+                      className="px-5 py-2.5 rounded-xl bg-[#8B5CF6] hover:bg-[#7c3aed] text-white text-xs font-bold shadow-lg shadow-[#8B5CF6]/20 inline-flex items-center gap-2"
+                    >
+                      <Upload className="w-4 h-4" />
+                      <span>Upload Audio</span>
+                    </button>
+                  </div>
                 </div>
               )}
 
@@ -1714,53 +1848,77 @@ export const AppWorkspace: React.FC<AppWorkspaceProps> = ({ onBackToLanding }) =
               {meetingDetail?.status === 'completed' && (
                 <>
                   {/* Interactive Audio Player Bar */}
-                  {selectedMeetingId && (
-                    <div className="p-4 rounded-2xl bg-[#111113] border border-[#27272A] flex flex-col sm:flex-row items-center justify-between gap-4 shadow-xl">
-                      <audio
-                        ref={audioRef}
-                        src={getAudioStreamUrl(selectedMeetingId)}
-                        preload="metadata"
-                      />
-
-                      <div className="flex items-center gap-3 w-full sm:w-auto">
-                        <button
-                          onClick={handleToggleAudio}
-                          className="w-10 h-10 rounded-full bg-[#8B5CF6] hover:bg-[#7c3aed] text-white flex items-center justify-center cursor-pointer shadow-lg shadow-[#8B5CF6]/30 transition-transform active:scale-95 shrink-0"
-                        >
-                          {isPlaying ? <Pause className="w-5 h-5" /> : <Play className="w-5 h-5 ml-0.5" />}
-                        </button>
-
-                        <div className="space-y-0.5">
-                          <div className="text-xs font-bold text-white">Meeting Audio Recording</div>
-                          <div className="text-[11px] font-mono text-slate-400">
-                            {formatTimestampSeconds(currentTime)} / {formatTimestampSeconds(audioDuration)}
-                          </div>
-                        </div>
-                      </div>
-
-                      {/* Seek Bar */}
-                      <div className="flex-1 w-full max-w-xl flex items-center gap-3">
-                        <input
-                          type="range"
-                          min={0}
-                          max={audioDuration || 100}
-                          value={currentTime}
-                          onChange={(e) => {
-                            const val = parseFloat(e.target.value);
-                            setCurrentTime(val);
-                            if (audioRef.current) audioRef.current.currentTime = val;
-                          }}
-                          className="w-full accent-[#8B5CF6] bg-[#18181b] h-1.5 rounded-lg cursor-pointer"
+                  {selectedMeetingId && meetingDetail && (
+                    meetingDetail.audio_url ? (
+                      <div className="p-4 rounded-2xl bg-[#111113] border border-[#27272A] flex flex-col sm:flex-row items-center justify-between gap-4 shadow-xl">
+                        <audio
+                          ref={audioRef}
+                          src={getAudioStreamUrl(selectedMeetingId)}
+                          preload="metadata"
                         />
 
-                        <button
-                          onClick={handleToggleMute}
-                          className="p-2 rounded-lg text-slate-400 hover:text-white transition-colors"
-                        >
-                          {isMuted ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}
-                        </button>
+                        <div className="flex items-center gap-3 w-full sm:w-auto">
+                          <button
+                            onClick={handleToggleAudio}
+                            className="w-10 h-10 rounded-full bg-[#8B5CF6] hover:bg-[#7c3aed] text-white flex items-center justify-center cursor-pointer shadow-lg shadow-[#8B5CF6]/30 transition-transform active:scale-95 shrink-0"
+                          >
+                            {isPlaying ? <Pause className="w-5 h-5" /> : <Play className="w-5 h-5 ml-0.5" />}
+                          </button>
+
+                          <div className="space-y-0.5">
+                            <div className="text-xs font-bold text-white">Meeting Audio Recording</div>
+                            <div className="text-[11px] font-mono text-slate-400">
+                              {formatTimestampSeconds(currentTime)} / {formatTimestampSeconds(audioDuration)}
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Seek Bar */}
+                        <div className="flex-1 w-full max-w-xl flex items-center gap-3">
+                          <input
+                            type="range"
+                            min={0}
+                            max={audioDuration || 100}
+                            value={currentTime}
+                            onChange={(e) => {
+                              const val = parseFloat(e.target.value);
+                              setCurrentTime(val);
+                              if (audioRef.current) audioRef.current.currentTime = val;
+                            }}
+                            className="w-full accent-[#8B5CF6] bg-[#18181b] h-1.5 rounded-lg cursor-pointer"
+                          />
+
+                          <button
+                            onClick={handleToggleMute}
+                            className="p-2 rounded-lg text-slate-400 hover:text-white transition-colors"
+                          >
+                            {isMuted ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}
+                          </button>
+                        </div>
                       </div>
-                    </div>
+                    ) : (
+                      <div className="p-4 rounded-2xl bg-[#111113] border border-[#27272A] flex items-center justify-between gap-3 text-xs shadow-xl">
+                        <div className="flex items-center gap-3">
+                          <div className="w-9 h-9 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 flex items-center justify-center font-bold shrink-0">
+                            <Check className="w-4 h-4" />
+                          </div>
+                          <div>
+                            <div className="font-bold text-white flex items-center gap-2">
+                              <span>Live Meeting Intelligence Complete</span>
+                              <span className="px-1.5 py-0.2 bg-emerald-950/80 border border-emerald-500/40 text-emerald-300 rounded text-[9px] font-mono uppercase">
+                                Live Session
+                              </span>
+                            </div>
+                            <p className="text-[11px] text-slate-400 mt-0.5">
+                              Google Gemini has synthesized the live meeting into the summary, tasks, decisions, and interactive chat below.
+                            </p>
+                          </div>
+                        </div>
+                        <span className="font-mono text-emerald-400 text-xs font-bold shrink-0">
+                          {formatDuration(meetingDetail.duration_seconds)}
+                        </span>
+                      </div>
+                    )
                   )}
 
                   {/* Sub-tab 1: SUMMARY & DECISIONS */}
@@ -3303,8 +3461,21 @@ export const AppWorkspace: React.FC<AppWorkspaceProps> = ({ onBackToLanding }) =
         </div>
       )}
 
-      {/* Floating Feedback Toast */}
+      {/* Step C1 & C3: Live Google Meet Capture & Mandatory Legal Consent Modal */}
+      <LiveMeetingModal
+        isOpen={liveMeetModalOpen}
+        onClose={() => setLiveMeetModalOpen(false)}
+        workspaceId={activeWorkspaceId || ''}
+        getToken={getToken}
+        onSuccess={(created) => {
+          mutateMeetings();
+          setSelectedMeetingId(created.id);
+          setActiveTab('meeting');
+          showToast(`Joined Google Meet call! Bot is actively transcribing.`);
+        }}
+      />
 
+      {/* Floating Feedback Toast */}
       {toastMessage && (
         <div
           className={`fixed bottom-6 right-6 z-50 flex items-center gap-3 px-4 py-3 rounded-2xl border shadow-2xl text-xs font-semibold animate-fadeIn ${

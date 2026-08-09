@@ -1,6 +1,6 @@
 export type TaskPriority = 'low' | 'medium' | 'high';
 export type TaskStatus = 'todo' | 'doing' | 'done';
-export type MeetingStatus = 'queued' | 'processing' | 'completed' | 'failed';
+export type MeetingStatus = 'in_progress' | 'queued' | 'processing' | 'completed' | 'failed';
 
 export interface TaskItem {
   id: string;
@@ -41,6 +41,8 @@ export interface Meeting {
   workspaceId: string;
   title: string;
   status: MeetingStatus;
+  source?: 'upload' | 'live' | string;
+  native_meeting_id?: string | null;
   date: string;
   duration: string;
   durationSeconds?: number | null;
@@ -88,6 +90,8 @@ export interface ApiMeetingListItem {
   id: string;
   title: string;
   status: MeetingStatus;
+  source?: 'upload' | 'live' | string;
+  native_meeting_id?: string | null;
   duration_seconds?: number | null;
   created_at: string;
   participants: Array<{
