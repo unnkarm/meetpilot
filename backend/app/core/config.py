@@ -1,5 +1,29 @@
+import os
 from functools import lru_cache
-from pydantic_settings import BaseSettings, SettingsConfigDict
+
+try:
+    from pydantic_settings import BaseSettings, SettingsConfigDict
+except ImportError:
+    from pydantic import BaseModel
+    class BaseSettings(BaseModel):  # type: ignore[no-redef]
+        def __init__(self, **kwargs):
+            super().__init__(**kwargs)
+            for field in self.model_fields:
+                env_val = os.getenv(field)
+                if env_val is not None:
+                    try:
+                        f_type = self.model_fields[field].annotation
+                        if f_type is int:
+                            setattr(self, field, int(env_val))
+                        elif f_type is bool:
+                            setattr(self, field, env_val.lower() in ("true", "1", "yes"))
+                        else:
+                            setattr(self, field, env_val)
+                    except Exception:
+                        setattr(self, field, env_val)
+
+    def SettingsConfigDict(**kwargs):  # type: ignore[no-redef]
+        return kwargs
 
 
 class Settings(BaseSettings):
@@ -28,8 +52,9 @@ class Settings(BaseSettings):
 
     # Gemini & AI Configuration (Configurable Quotas & Models)
     GEMINI_API_KEY: str = ""
-    GEMINI_TEXT_MODEL: str = "gemini-3.5-flash"
-    GEMINI_AUDIO_MODEL: str = "gemini-3.5-flash"
+    GEMINI_TEXT_MODEL: str = "gemini-2.0-flash"
+    GEMINI_AUDIO_MODEL: str = "gemini-2.0-flash"
+    GEMINI_EMBEDDING_MODEL: str = "text-embedding-004"
     GEMINI_RPM_LIMIT: int = 15
     GEMINI_TPM_LIMIT: int = 1000000
     GEMINI_RPD_LIMIT: int = 1500

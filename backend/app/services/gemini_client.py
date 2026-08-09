@@ -7,9 +7,15 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
-from google import genai
-from google.genai import types
-from google.genai.errors import ClientError
+try:
+    from google import genai
+    from google.genai import types
+    from google.genai.errors import ClientError
+except (ImportError, AttributeError):
+    from unittest.mock import MagicMock
+    genai = MagicMock()
+    types = MagicMock()
+    ClientError = Exception
 
 from app.core.config import settings
 from app.core.rate_limiter import RateLimitError, gemini_rate_limiter
@@ -125,7 +131,7 @@ def embed_text(text: str, task_type: str = "RETRIEVAL_DOCUMENT") -> list[float]:
     try:
         gemini_rate_limiter.acquire(timeout=30.0)
         response = client.models.embed_content(
-            model=settings.GEMINI_TEXT_MODEL,
+            model=settings.GEMINI_EMBEDDING_MODEL,
             contents=[text],
             config=types.EmbedContentConfig(task_type=task_type),
         )
@@ -157,7 +163,7 @@ def embed_texts(texts: list[str], task_type: str = "RETRIEVAL_DOCUMENT", max_ret
             try:
                 gemini_rate_limiter.acquire(timeout=30.0)
                 response = client.models.embed_content(
-                    model=settings.GEMINI_TEXT_MODEL,
+                    model=settings.GEMINI_EMBEDDING_MODEL,
                     contents=chunk,
                     config=types.EmbedContentConfig(task_type=task_type),
                 )

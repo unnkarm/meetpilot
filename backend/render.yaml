@@ -8,34 +8,31 @@ services:
     startCommand: gunicorn -w 4 -k uvicorn.workers.UvicornWorker app.main:app --bind 0.0.0.0:$PORT
     envVars:
       - key: DATABASE_URL
-        fromDatabase:
-          name: meetpilot-postgres
-          property: connectionString
-      - key: REDIS_URL
-        fromService:
-          type: redis
-          name: meetpilot-redis
-          property: connectionString
-      - key: CELERY_BROKER_URL
-        fromService:
-          type: redis
-          name: meetpilot-redis
-          property: connectionString
-      - key: CELERY_RESULT_BACKEND
-        fromService:
-          type: redis
-          name: meetpilot-redis
-          property: connectionString
+        sync: false
+      - key: HF_SPACE_ID
+        value: "Subham05x/meetpilot-whisper-diarization"
+      - key: HF_API_TOKEN
+        sync: false
+      - key: HF_SPACE_TIMEOUT_SECONDS
+        value: "600"
       - key: GEMINI_API_KEY
         sync: false
+      - key: GEMINI_TEXT_MODEL
+        value: "gemini-2.0-flash"
+      - key: GEMINI_EMBEDDING_MODEL
+        value: "text-embedding-004"
       - key: CLERK_SECRET_KEY
         sync: false
       - key: CLERK_PUBLISHABLE_KEY
         sync: false
       - key: CLERK_JWKS_URL
         sync: false
+      - key: CLERK_ISSUER_URL
+        sync: false
       - key: CORS_ORIGINS
         value: "https://*.vercel.app,http://localhost:3000,http://localhost:5173"
+      - key: ENCRYPTION_SECRET_KEY
+        sync: false
 
   # Celery Background Worker Service
   - type: worker
@@ -46,35 +43,18 @@ services:
     startCommand: celery -A app.core.celery_app.celery_app worker --loglevel=info
     envVars:
       - key: DATABASE_URL
-        fromDatabase:
-          name: meetpilot-postgres
-          property: connectionString
-      - key: REDIS_URL
-        fromService:
-          type: redis
-          name: meetpilot-redis
-          property: connectionString
-      - key: CELERY_BROKER_URL
-        fromService:
-          type: redis
-          name: meetpilot-redis
-          property: connectionString
-      - key: CELERY_RESULT_BACKEND
-        fromService:
-          type: redis
-          name: meetpilot-redis
-          property: connectionString
+        sync: false
+      - key: HF_SPACE_ID
+        value: "Subham05x/meetpilot-whisper-diarization"
+      - key: HF_API_TOKEN
+        sync: false
+      - key: HF_SPACE_TIMEOUT_SECONDS
+        value: "600"
       - key: GEMINI_API_KEY
         sync: false
-
-# Managed Redis instance
-  - type: redis
-    name: meetpilot-redis
-    region: oregon
-    ipAllowList: []
-
-# Managed Postgres database with pgvector
-databases:
-  - name: meetpilot-postgres
-    region: oregon
-    postgresMajorVersion: 16
+      - key: GEMINI_TEXT_MODEL
+        value: "gemini-2.0-flash"
+      - key: GEMINI_EMBEDDING_MODEL
+        value: "text-embedding-004"
+      - key: ENCRYPTION_SECRET_KEY
+        sync: false

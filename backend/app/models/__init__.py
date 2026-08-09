@@ -1,5 +1,6 @@
 from app.models.chat import ChatMessage, ChatRole  # noqa: F401
 from app.models.decision import Decision  # noqa: F401
+from app.models.document import DocumentChunk, KnowledgeDocument  # noqa: F401
 from app.models.integration import WorkspaceIntegration  # noqa: F401
 from app.models.meeting import Meeting, MeetingParticipant, MeetingStatus, MeetingSummary  # noqa: F401
 from app.models.notification import Notification, NotificationType  # noqa: F401

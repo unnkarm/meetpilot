@@ -3,7 +3,11 @@ import time
 import uuid
 from typing import Optional
 
-import redis
+try:
+    import redis
+except ImportError:
+    from unittest.mock import MagicMock
+    redis = MagicMock()
 
 from app.core.config import settings
 

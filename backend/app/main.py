@@ -5,7 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
 
 import app.models  # noqa: F401  (registers all models on Base.metadata)
-from app.api.routes import auth, chat, integrations, live_meetings, meetings, search, tasks, users, workspaces
+from app.api.routes import auth, chat, documents, integrations, live_meetings, meetings, search, tasks, users, workspaces
 from app.core.config import settings
 
 from app.database.base import Base
@@ -64,6 +64,7 @@ app.include_router(live_meetings.router)
 app.include_router(tasks.router)
 app.include_router(search.router)
 app.include_router(chat.router)
+app.include_router(documents.router)
 app.include_router(integrations.router)
 
 

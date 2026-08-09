@@ -28,6 +28,7 @@ class Workspace(Base):
     members = relationship("WorkspaceMember", back_populates="workspace", cascade="all, delete-orphan")
     meetings = relationship("Meeting", back_populates="workspace", cascade="all, delete-orphan")
     integrations = relationship("WorkspaceIntegration", back_populates="workspace", cascade="all, delete-orphan")
+    knowledge_documents = relationship("KnowledgeDocument", back_populates="workspace", cascade="all, delete-orphan")
 
 
 
