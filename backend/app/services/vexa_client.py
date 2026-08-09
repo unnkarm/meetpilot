@@ -140,31 +140,57 @@ def stop_google_meet_bot(native_meeting_id: str) -> dict[str, Any]:
 
 
 def fetch_vexa_audio(meeting_id: Any, native_meeting_id: str) -> Optional[str]:
-    """Attempts to retrieve the consolidated audio recording from Vexa and stores it locally."""
+    """Attempts to retrieve the consolidated master audio recording from Vexa and stores it locally."""
     try:
         from pathlib import Path
         audio_dir = Path(settings.STORAGE_DIR) / "audio"
         audio_dir.mkdir(parents=True, exist_ok=True)
         dest_path = audio_dir / f"{meeting_id}.webm"
 
-        meeting_api_url = f"http://host.docker.internal:18080/recordings/{native_meeting_id}/master?type=audio"
-        req = urllib.request.Request(
-            meeting_api_url,
-            headers={
-                "X-API-Key": settings.VEXA_API_KEY,
-            },
-        )
-        with urllib.request.urlopen(req, timeout=10.0) as resp:
-            if resp.status == 200:
-                audio_bytes = resp.read()
-                if audio_bytes and len(audio_bytes) > 500:
-                    with dest_path.open("wb") as out:
-                        out.write(audio_bytes)
-                    return f"local://{dest_path}"
+        base_url = settings.VEXA_API_URL.rstrip("/")
+        headers = {"X-API-Key": settings.VEXA_API_KEY}
+
+        # 1. Fetch available recordings from Vexa gateway
+        list_req = urllib.request.Request(f"{base_url}/recordings", headers=headers)
+        with urllib.request.urlopen(list_req, timeout=10.0) as resp:
+            rec_doc = json.loads(resp.read().decode("utf-8"))
+
+        recordings = rec_doc.get("recordings", [])
+        if not recordings:
+            logger.info("No recordings found in Vexa for meeting %s", native_meeting_id)
+            return None
+
+        # Pick the most recent recording
+        target_rec = recordings[-1]
+        rec_id = target_rec.get("id")
+        if not rec_id:
+            return None
+
+        # 2. Query master metadata to obtain raw stream URL
+        master_req = urllib.request.Request(f"{base_url}/recordings/{rec_id}/master?type=audio", headers=headers)
+        with urllib.request.urlopen(master_req, timeout=10.0) as resp:
+            master_data = json.loads(resp.read().decode("utf-8"))
+
+        raw_url = master_data.get("raw_url")
+        if not raw_url:
+            return None
+
+        # 3. Download the assembled master audio bytes
+        full_audio_url = f"{base_url}{raw_url}" if raw_url.startswith("/") else raw_url
+        audio_req = urllib.request.Request(full_audio_url, headers=headers)
+        with urllib.request.urlopen(audio_req, timeout=30.0) as resp:
+            audio_bytes = resp.read()
+            if audio_bytes and len(audio_bytes) > 500:
+                with dest_path.open("wb") as out:
+                    out.write(audio_bytes)
+                logger.info("Successfully fetched and saved %d audio bytes for live meeting %s", len(audio_bytes), meeting_id)
+                return f"local://{dest_path}"
+
     except Exception as e:
-        logger.debug("Meeting-API master audio query failed: %s", e)
+        logger.warning("Vexa audio retrieval failed for meeting %s: %s", native_meeting_id, e)
 
     return None
+
 
 
 def get_vexa_transcript(platform: str, native_meeting_id: str) -> list[dict[str, Any]]:

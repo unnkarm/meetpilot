@@ -101,7 +101,7 @@ export const Navbar: React.FC<NavbarProps> = ({
             <>
               <SignedOut>
                 <button
-                  onClick={onOpenAuth}
+                  onClick={() => onOpenAuth('signin')}
                   className="text-xs font-bold text-slate-300 hover:text-white px-3.5 py-2 transition-colors cursor-pointer"
                 >
                   Sign In
@@ -113,7 +113,7 @@ export const Navbar: React.FC<NavbarProps> = ({
             </>
           ) : (
             <button
-              onClick={onOpenAuth}
+              onClick={() => onOpenAuth('signin')}
               className="text-xs font-bold text-slate-300 hover:text-white px-3.5 py-2 transition-colors cursor-pointer"
             >
               Sign In

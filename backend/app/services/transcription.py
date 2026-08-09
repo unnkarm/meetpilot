@@ -14,7 +14,7 @@ from app.services.gemini_client import generate_json
 
 logger = logging.getLogger(__name__)
 
-_SCHEMA = {
+_GEMINI_SCHEMA = {
     "type": "object",
     "properties": {
         "segments": {
@@ -39,7 +39,7 @@ _SCHEMA = {
     "required": ["segments"],
 }
 
-_SYSTEM_INSTRUCTION = (
+_GEMINI_SYSTEM_INSTRUCTION = (
     "You are an expert meeting transcriptionist. Listen to the provided audio and produce a "
     "complete, verbatim transcript split into short segments (one per speaker turn). "
     "Identify distinct speakers and label them consistently as 'Speaker 1', 'Speaker 2', etc., "
@@ -87,7 +87,6 @@ def _transcribe_local_audio(audio_path: Path) -> list[TranscriptSegmentDict]:
 
         segments: list[TranscriptSegmentDict] = []
         cur_t = 0.0
-        speaker_idx = 1
 
         for i, ch in enumerate(chunks):
             ch_len = len(ch) / 1000.0
@@ -111,71 +110,57 @@ def _transcribe_local_audio(audio_path: Path) -> list[TranscriptSegmentDict]:
         return []
 
 
-def transcribe_audio(audio_path: Path, meeting_id: str | None = None) -> list[TranscriptSegmentDict]:
-    """Transcribes audio using local zero-cost inference or sequential Gemini diarization.
+def _transcribe_hf_space(audio_path: Path, meeting_id: str) -> list[TranscriptSegmentDict]:
+    """Transcribes audio via Hugging Face ZeroGPU Gradio Space (faster-whisper + pyannote diarization).
 
-    For long meetings (>15m), splits the audio into overlapping chunks, transcribes sequentially
-    with known speaker context, adjusts local offsets, and stitches with overlap deduplication.
+    Supports direct single-pass audio requests or chunked execution for extra-long recordings.
     """
-    # If local zero-cost transcription is preferred and Gemini API key is unset or local mode is forced
-    if settings.USE_LOCAL_WHISPER and not settings.GEMINI_API_KEY:
-        local_segs = _transcribe_local_audio(audio_path)
-        if local_segs:
-            return local_segs
+    if not settings.HF_SPACE_ID:
+        raise ValueError("HF_SPACE_ID is not configured.")
 
-    m_id = meeting_id or audio_path.stem
-    chunks = split_audio(audio_path, meeting_id=m_id)
-    known_speakers: list[str] = []
+    from gradio_client import Client, handle_file
+
+    client = Client(
+        settings.HF_SPACE_ID,
+        token=settings.HF_API_TOKEN or None,
+    )
+
+    chunks = split_audio(audio_path, meeting_id=meeting_id)
     all_segments: list[dict[str, Any]] = []
 
     try:
         for idx, chunk in enumerate(chunks):
             chunk_path = chunk["path"]
             offset_seconds = chunk["start_offset_ms"] / 1000.0
-            prompt = build_diarization_prompt(known_speakers)
 
             logger.info(
-                "Transcribing chunk %d/%d for meeting %s (offset: %.1fs)...",
+                "[HF_SPACE] Transcribing chunk %d/%d for meeting %s (offset: %.1fs)...",
                 idx + 1,
                 len(chunks),
-                m_id,
+                meeting_id,
                 offset_seconds,
             )
 
-            result = generate_json(
-                prompt=prompt,
-                response_schema=_SCHEMA,
-                system_instruction=_SYSTEM_INSTRUCTION,
-                audio_path=chunk_path,
+            result = client.predict(
+                audio_file=handle_file(str(chunk_path)),
+                min_speakers=None,
+                max_speakers=None,
+                language=None,
+                api_name="/transcribe",
             )
 
-            chunk_segments = result.get("segments", [])
+            chunk_segments = result.get("segments", []) if isinstance(result, dict) else result
+            if not isinstance(chunk_segments, list):
+                raise ValueError(f"Unexpected response format from HF Space: {type(result)}")
+
             for seg in chunk_segments:
-                # Re-align local chunk timestamp to full meeting timeline
                 seg["start_time"] = round(float(seg["start_time"]) + offset_seconds, 3)
                 seg["end_time"] = round(float(seg["end_time"]) + offset_seconds, 3)
                 all_segments.append(seg)
 
-            # Update speaker descriptions for next chunk's continuity prompt
-            chunk_speakers = result.get("speaker_descriptions", [])
-            if chunk_speakers:
-                known_speakers = chunk_speakers
-            elif chunk_segments:
-                unique_speakers = list({s["speaker"] for s in chunk_segments if s.get("speaker")})
-                known_speakers = [f"{spk} (voice from previous segment)" for spk in unique_speakers]
-
-    except Exception as exc:
-        logger.warning("Gemini audio transcription fallback to local speech parsing: %s", exc)
-        local_fallback = _transcribe_local_audio(audio_path)
-        if local_fallback:
-            return local_fallback
-        raise exc
-
     finally:
-        # Clean up temporary sliced files
         cleanup_temp_chunks(chunks)
 
-    # Stitch and deduplicate the overlap seam regions across consecutive chunks
     final_segments = dedupe_overlap_segments(all_segments, overlap_seconds=OVERLAP_MS / 1000.0)
 
     return [
@@ -187,3 +172,117 @@ def transcribe_audio(audio_path: Path, meeting_id: str | None = None) -> list[Tr
         )
         for s in final_segments
     ]
+
+
+def _transcribe_gemini(audio_path: Path, meeting_id: str) -> list[TranscriptSegmentDict]:
+    """Transcribes audio using sequential Gemini audio understanding + diarization."""
+    chunks = split_audio(audio_path, meeting_id=meeting_id)
+    known_speakers: list[str] = []
+    all_segments: list[dict[str, Any]] = []
+
+    try:
+        for idx, chunk in enumerate(chunks):
+            chunk_path = chunk["path"]
+            offset_seconds = chunk["start_offset_ms"] / 1000.0
+            prompt = build_diarization_prompt(known_speakers)
+
+            logger.info(
+                "[GEMINI_AUDIO] Transcribing chunk %d/%d for meeting %s (offset: %.1fs)...",
+                idx + 1,
+                len(chunks),
+                meeting_id,
+                offset_seconds,
+            )
+
+            result = generate_json(
+                prompt=prompt,
+                response_schema=_GEMINI_SCHEMA,
+                system_instruction=_GEMINI_SYSTEM_INSTRUCTION,
+                audio_path=chunk_path,
+            )
+
+            chunk_segments = result.get("segments", [])
+            for seg in chunk_segments:
+                seg["start_time"] = round(float(seg["start_time"]) + offset_seconds, 3)
+                seg["end_time"] = round(float(seg["end_time"]) + offset_seconds, 3)
+                all_segments.append(seg)
+
+            chunk_speakers = result.get("speaker_descriptions", [])
+            if chunk_speakers:
+                known_speakers = chunk_speakers
+            elif chunk_segments:
+                unique_speakers = list({s["speaker"] for s in chunk_segments if s.get("speaker")})
+                known_speakers = [f"{spk} (voice from previous segment)" for spk in unique_speakers]
+
+    finally:
+        cleanup_temp_chunks(chunks)
+
+    final_segments = dedupe_overlap_segments(all_segments, overlap_seconds=OVERLAP_MS / 1000.0)
+
+    return [
+        TranscriptSegmentDict(
+            speaker=s.get("speaker", "Speaker 1"),
+            start_time=float(s.get("start_time", 0.0)),
+            end_time=float(s.get("end_time", 0.0)),
+            text=s.get("text", ""),
+        )
+        for s in final_segments
+    ]
+
+
+def transcribe_audio(audio_path: Path, meeting_id: str | None = None) -> list[TranscriptSegmentDict]:
+    """Primary meeting transcription entrypoint.
+
+    Execution precedence:
+    1. Hugging Face ZeroGPU Space (faster-whisper + pyannote diarization) when configured.
+    2. Fallback to Google Gemini ASR + Diarization if HF Space fails, times out, or is unconfigured.
+    3. Zero-cost local silence chunker fallback if Gemini is unconfigured/fails.
+    """
+    m_id = meeting_id or audio_path.stem
+
+    # 1. Attempt Hugging Face ZeroGPU Space if configured
+    if settings.HF_SPACE_ID:
+        try:
+            logger.info("[ENGINE: HF_WHISPER_PYANNOTE] Initiating ZeroGPU Space transcription for meeting %s...", m_id)
+            segments = _transcribe_hf_space(audio_path, meeting_id=m_id)
+            if segments:
+                logger.info(
+                    "[ENGINE: HF_WHISPER_PYANNOTE] Successfully transcribed meeting %s (%d segments).",
+                    m_id,
+                    len(segments),
+                )
+                return segments
+            logger.warning("[HF_SPACE] Returned 0 segments; triggering fallback to Gemini.")
+        except Exception as hf_exc:
+            logger.warning(
+                "[FALLBACK: HF->GEMINI] Hugging Face ZeroGPU Space failed for meeting %s: %s. Falling back to Gemini...",
+                m_id,
+                hf_exc,
+            )
+
+    # 2. Attempt Google Gemini transcription if API key is present
+    if settings.GEMINI_API_KEY:
+        try:
+            logger.info("[ENGINE: GEMINI_FLASH] Initiating Gemini transcription for meeting %s...", m_id)
+            segments = _transcribe_gemini(audio_path, meeting_id=m_id)
+            if segments:
+                logger.info(
+                    "[ENGINE: GEMINI_FLASH] Successfully transcribed meeting %s (%d segments).",
+                    m_id,
+                    len(segments),
+                )
+                return segments
+        except Exception as gemini_exc:
+            logger.warning(
+                "[FALLBACK: GEMINI->LOCAL] Gemini transcription failed for meeting %s: %s. Falling back to local...",
+                m_id,
+                gemini_exc,
+            )
+
+    # 3. Local zero-cost fallback
+    logger.info("[ENGINE: LOCAL_FALLBACK] Transcribing meeting %s with local speech parser...", m_id)
+    local_segs = _transcribe_local_audio(audio_path)
+    if local_segs:
+        return local_segs
+
+    raise RuntimeError(f"All transcription engines failed for audio file: {audio_path}")

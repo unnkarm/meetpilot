@@ -28,8 +28,11 @@ def save_upload(file: UploadFile, meeting_id: uuid.UUID) -> str:
     return f"local://{dest}"
 
 
-def resolve_local_path(storage_url: str) -> Path:
+def resolve_local_path(storage_url: str | None) -> Path:
     """Turns a `local://...` URL back into a filesystem Path for processing."""
+    if not storage_url:
+        raise ValueError("storage_url cannot be None or empty")
     if not storage_url.startswith("local://"):
         raise ValueError(f"Unsupported storage backend for URL: {storage_url}")
     return Path(storage_url.removeprefix("local://"))
+

@@ -39,6 +39,7 @@ Thumbs.db
 *.swp
 *.swo
 *~
+.agents
 
 # ------------------------------------------------------------------------------
 # Node / Frontend (React / Vite / TypeScript)
@@ -134,3 +135,4 @@ logs/
 *.bak
 scratch/
 vexa/
+docs/

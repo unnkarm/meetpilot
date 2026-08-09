@@ -38,6 +38,11 @@ class Settings(BaseSettings):
     USE_LOCAL_WHISPER: bool = True
     USE_LOCAL_EMBEDDINGS: bool = True
 
+    # Hugging Face ZeroGPU Space (Self-Hosted Whisper + PyAnnote Diarization)
+    HF_SPACE_ID: str = "Subham05x/meetpilot-whisper-diarization"
+    HF_API_TOKEN: str = ""
+    HF_SPACE_TIMEOUT_SECONDS: int = 600
+
 
     # Storage
     STORAGE_DIR: str = "./storage"

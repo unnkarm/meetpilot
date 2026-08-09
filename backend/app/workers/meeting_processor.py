@@ -5,7 +5,7 @@ from app.core.celery_app import celery_app
 from app.core.rate_limiter import RateLimitError
 from app.database.session import SessionLocal
 from app.models.decision import Decision
-from app.models.meeting import Meeting, MeetingStatus, MeetingSummary
+from app.models.meeting import Meeting, MeetingParticipant, MeetingStatus, MeetingSummary
 from app.models.notification import Notification, NotificationType
 from app.models.task import Task, TaskPriority
 from app.models.transcript import TranscriptSegment
@@ -73,6 +73,12 @@ def process_transcript_intelligence(db, meeting: Meeting, raw_segments: list[dic
 
     insights = generate_meeting_insights(transcript_text, participant_names)
 
+    # Clean up any existing summaries, tasks, or decisions for this meeting to ensure idempotent processing
+    db.query(MeetingSummary).filter(MeetingSummary.meeting_id == meeting.id).delete()
+    db.query(Task).filter(Task.meeting_id == meeting.id).delete()
+    db.query(Decision).filter(Decision.meeting_id == meeting.id).delete()
+    db.flush()
+
     db.add(
         MeetingSummary(
             meeting_id=meeting.id,
@@ -81,6 +87,7 @@ def process_transcript_intelligence(db, meeting: Meeting, raw_segments: list[dic
             next_steps=insights["next_steps"],
         )
     )
+
 
     for t in insights.get("tasks", []):
         priority = t.get("priority", "medium")
@@ -144,10 +151,20 @@ def process_meeting(self, meeting_id: str) -> None:
             logger.error("Meeting %s not found, aborting processing", meeting_id)
             return
 
+        # If this is a live meeting session, delegate to process_live_meeting
+        if getattr(meeting, "source", None) == "live" or (not meeting.audio_url and getattr(meeting, "native_meeting_id", None)):
+            db.close()
+            process_live_meeting(meeting_id)
+            return
+
+        if not meeting.audio_url:
+            raise ValueError(f"Meeting {meeting.id} has no audio recording uploaded.")
+
         meeting.status = MeetingStatus.processing
         db.commit()
 
         audio_path = resolve_local_path(meeting.audio_url)
+
 
         # 1. Transcription + speaker segmentation with Redis rate limiting & chunking
         raw_segments = transcribe_audio(audio_path, meeting_id=str(meeting.id))
@@ -246,6 +263,13 @@ def process_live_meeting(self, meeting_id: str) -> None:
             except Exception as e:
                 logger.warning("Error fetching Vexa final transcript: %s", e)
 
+        if not raw_segments and meeting.audio_url:
+            try:
+                audio_path = resolve_local_path(meeting.audio_url)
+                raw_segments = transcribe_audio(audio_path, meeting_id=str(meeting.id))
+            except Exception as e:
+                logger.warning("Whisper transcription of live audio failed: %s", e)
+
         if not raw_segments:
             db_segs = (
                 db.query(TranscriptSegment)
@@ -257,6 +281,7 @@ def process_live_meeting(self, meeting_id: str) -> None:
                 {"speaker": s.speaker, "start_time": s.start_time, "end_time": s.end_time, "text": s.text}
                 for s in db_segs
             ]
+
 
         if not raw_segments:
             raw_segments = [

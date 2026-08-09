@@ -11,7 +11,8 @@ class NotificationOut(BaseModel):
     id: uuid.UUID
     user_id: uuid.UUID
     type: NotificationType
-    message: str
+    message: str | None = None
     meeting_id: uuid.UUID | None = None
     read: bool = False
     created_at: datetime
+
