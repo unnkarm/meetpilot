@@ -165,12 +165,39 @@ export interface ApiSearchResult {
   meeting_id: string;
   meeting_title: string;
   snippet: string;
+  speaker?: string | null;
   timestamp?: string | null;
 }
 
 export interface ApiSearchResponse {
   query: string;
   results: ApiSearchResult[];
+}
+
+export interface ApiSpeakerAirtimeItem {
+  speaker: string;
+  duration_seconds: number;
+  percentage: number;
+  turn_count: number;
+}
+
+export interface ApiWorkspaceAnalytics {
+  workspace_id: string;
+  total_meetings: number;
+  completed_meetings: number;
+  processing_meetings: number;
+  queued_meetings: number;
+  failed_meetings: number;
+  total_speaking_seconds: number;
+  total_speaking_hours: number;
+  avg_meeting_duration_minutes: number;
+  total_decisions: number;
+  total_tasks: number;
+  completed_tasks: number;
+  in_progress_tasks: number;
+  todo_tasks: number;
+  task_completion_rate: number;
+  speakers_distribution: ApiSpeakerAirtimeItem[];
 }
 
 export interface TechStackItem {
@@ -187,5 +214,56 @@ export interface FeatureCard {
   icon: string;
   badge?: string;
   colSpan?: string;
+}
+
+export interface ApiKnowledgeDocument {
+  id: string;
+  workspace_id: string;
+  title: string;
+  filename: string;
+  file_type: 'pdf' | 'docx' | 'txt' | 'md' | string;
+  file_size: number;
+  status: 'uploading' | 'processing' | 'ready' | 'failed';
+  failure_reason?: string | null;
+  chunk_count: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ApiKnowledgeCitation {
+  type: 'document' | 'meeting';
+  title: string;
+  document_id?: string | null;
+  meeting_id?: string | null;
+  page_number?: number | null;
+  timestamp?: string | null;
+  speaker?: string | null;
+  snippet: string;
+}
+
+export interface ApiKnowledgeChatResponse {
+  answer: string;
+  citations: ApiKnowledgeCitation[];
+}
+
+export interface ApiKnowledgeChatMessage {
+  id: string;
+  role: 'user' | 'assistant';
+  content: string;
+  time: string;
+  citations?: ApiKnowledgeCitation[];
+}
+
+export interface ApiWorkspaceSearchResult {
+  type: 'transcript' | 'meeting' | 'document' | 'task' | 'decision';
+  meeting_id?: string | null;
+  meeting_title?: string | null;
+  document_id?: string | null;
+  document_title?: string | null;
+  page_number?: number | null;
+  snippet: string;
+  speaker?: string | null;
+  timestamp?: string | null;
+  created_at?: string | null;
 }
 

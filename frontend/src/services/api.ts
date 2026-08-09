@@ -12,6 +12,10 @@ import {
   ApiTranscriptSegment,
   ApiWorkspace,
   ApiWorkspaceMember,
+  ApiWorkspaceAnalytics,
+  ApiKnowledgeDocument,
+  ApiKnowledgeChatResponse,
+  ApiWorkspaceSearchResult,
   TaskPriority,
   TaskStatus,
 } from '../types';
@@ -105,6 +109,14 @@ export function useWorkspaceMembers(workspaceId?: string | null, getToken?: () =
     workspaceId ? `/api/v1/workspaces/${workspaceId}/members` : null,
     createTokenFetcher(getToken),
     { revalidateOnFocus: false }
+  );
+}
+
+export function useWorkspaceAnalytics(workspaceId?: string | null, getToken?: () => Promise<string | null>) {
+  return useSWR<ApiWorkspaceAnalytics>(
+    workspaceId ? `/api/v1/workspaces/${workspaceId}/analytics` : null,
+    createTokenFetcher(getToken),
+    { revalidateOnFocus: true, refreshInterval: 10000 }
   );
 }
 
@@ -261,6 +273,35 @@ export async function inviteWorkspaceMemberApi(
     {
       method: 'POST',
       body: JSON.stringify({ email, role }),
+    },
+    getToken
+  );
+}
+
+export async function updateWorkspaceApi(
+  workspaceId: string,
+  payload: { name: string },
+  getToken?: () => Promise<string | null>
+): Promise<ApiWorkspace> {
+  return apiFetch<ApiWorkspace>(
+    `/api/v1/workspaces/${workspaceId}`,
+    {
+      method: 'PATCH',
+      body: JSON.stringify(payload),
+    },
+    getToken
+  );
+}
+
+export async function removeWorkspaceMemberApi(
+  workspaceId: string,
+  userId: string,
+  getToken?: () => Promise<string | null>
+): Promise<void> {
+  return apiFetch<void>(
+    `/api/v1/workspaces/${workspaceId}/members/${userId}`,
+    {
+      method: 'DELETE',
     },
     getToken
   );
@@ -565,6 +606,98 @@ export async function stopLiveMeeting(
     {
       method: 'POST',
     },
+    getToken
+  );
+}
+
+// --- Workspace Document Knowledge Base ---
+
+export function useWorkspaceDocuments(
+  workspaceId: string | null,
+  getToken?: () => Promise<string | null>
+) {
+  return useSWR<ApiKnowledgeDocument[]>(
+    workspaceId ? `/api/v1/documents?workspace_id=${workspaceId}` : null,
+    (url: string) => apiFetch<ApiKnowledgeDocument[]>(url, {}, getToken),
+    {
+      refreshInterval: 5000,
+      revalidateOnFocus: true,
+      dedupingInterval: 2000,
+    }
+  );
+}
+
+export async function uploadDocumentApi(
+  workspaceId: string,
+  file: File,
+  getToken?: () => Promise<string | null>
+): Promise<{ document: ApiKnowledgeDocument; message: string }> {
+  const formData = new FormData();
+  formData.append('workspace_id', workspaceId);
+  formData.append('file', file);
+
+  const headers = new Headers();
+  if (getToken) {
+    try {
+      const token = await getToken();
+      if (token) headers.set('Authorization', `Bearer ${token}`);
+    } catch (err) {
+      console.warn('Failed to retrieve Clerk token for upload:', err);
+    }
+  }
+
+  const response = await fetch(`${API_BASE_URL}/api/v1/documents/upload`, {
+    method: 'POST',
+    headers,
+    body: formData,
+  });
+
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({ detail: 'Upload failed' }));
+    throw new Error(errorData.detail || `Upload failed with status ${response.status}`);
+  }
+
+  return response.json();
+}
+
+export async function deleteDocumentApi(
+  documentId: string,
+  getToken?: () => Promise<string | null>
+): Promise<{ success: boolean; message: string }> {
+  return apiFetch<{ success: boolean; message: string }>(
+    `/api/v1/documents/${documentId}`,
+    { method: 'DELETE' },
+    getToken
+  );
+}
+
+export async function sendKnowledgeChatApi(
+  workspaceId: string,
+  question: string,
+  getToken?: () => Promise<string | null>
+): Promise<ApiKnowledgeChatResponse> {
+  return apiFetch<ApiKnowledgeChatResponse>(
+    '/api/v1/knowledge/chat',
+    {
+      method: 'POST',
+      body: JSON.stringify({ workspace_id: workspaceId, question }),
+    },
+    getToken
+  );
+}
+
+export async function searchWorkspaceExtendedApi(
+  query: string,
+  workspaceId: string | null,
+  filterType: string = 'all',
+  getToken?: () => Promise<string | null>
+): Promise<{ query: string; filter_type: string; total_results: number; results: ApiWorkspaceSearchResult[] }> {
+  const params = new URLSearchParams({ q: query, filter_type: filterType });
+  if (workspaceId) params.append('workspace_id', workspaceId);
+
+  return apiFetch<{ query: string; filter_type: string; total_results: number; results: ApiWorkspaceSearchResult[] }>(
+    `/api/v1/search?${params.toString()}`,
+    {},
     getToken
   );
 }

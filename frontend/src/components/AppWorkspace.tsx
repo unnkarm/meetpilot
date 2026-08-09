@@ -50,6 +50,7 @@ import {
   Radio,
   FileCode,
   Video,
+  Brain,
 } from 'lucide-react';
 
 import { useUser, useClerk, useAuth } from '@clerk/clerk-react';
@@ -67,6 +68,7 @@ import {
   ApiChatMessage,
   ApiNotification,
   ApiSearchResult,
+  ApiKnowledgeDocument,
 } from '../types';
 import {
   apiFetch,
@@ -83,11 +85,15 @@ import {
   useWorkspaceTasks,
   useMeetingChat,
   useWorkspaceIntegrations,
+  useWorkspaceAnalytics,
+  useWorkspaceDocuments,
   useNotifications,
   useSearch,
   uploadMeetingAudio,
   createWorkspaceApi,
+  updateWorkspaceApi,
   inviteWorkspaceMemberApi,
+  removeWorkspaceMemberApi,
   updateTaskApi,
   createTaskApi,
   deleteTaskApi,
@@ -116,6 +122,8 @@ import { ActionItemsView } from './workspace/ActionItemsView';
 import { MeetingAssistantChat } from './workspace/MeetingAssistantChat';
 import { ProcessingStateCard } from './workspace/ProcessingStateCard';
 import { MeetingErrorCard } from './workspace/MeetingErrorCard';
+import { AIKnowledgeView } from './workspace/AIKnowledgeView';
+import { WorkspaceSemanticSearch } from './workspace/WorkspaceSemanticSearch';
 import { getMeetingSpeakerStats, formatTimeSeconds } from '../utils/speakerUtils';
 
 
@@ -156,8 +164,9 @@ export const AppWorkspace: React.FC<AppWorkspaceProps> = ({ onBackToLanding }) =
   const [activeTab, setActiveTab] = useState<
     | 'dashboard'
     | 'meeting'
-    | 'kanban'
+    | 'knowledge'
     | 'search'
+    | 'kanban'
     | 'analytics'
     | 'team'
     | 'integrations'
@@ -261,8 +270,12 @@ export const AppWorkspace: React.FC<AppWorkspaceProps> = ({ onBackToLanding }) =
   const [renameMeetingInput, setRenameMeetingInput] = useState('');
   const [savingMeetingTitle, setSavingMeetingTitle] = useState(false);
 
-  // Settings subtab
+  // Workspace Rename State
+  const [editingWorkspaceName, setEditingWorkspaceName] = useState(false);
+  const [workspaceRenameInput, setWorkspaceRenameInput] = useState('');
+  const [savingWorkspaceName, setSavingWorkspaceName] = useState(false);
 
+  // Settings subtab
   const [settingsTab, setSettingsTab] = useState<'profile' | 'workspace' | 'theme' | 'billing'>('profile');
 
   // Debounce search input (300ms)
@@ -305,6 +318,8 @@ export const AppWorkspace: React.FC<AppWorkspaceProps> = ({ onBackToLanding }) =
   const { data: meetings, mutate: mutateMeetings } = useMeetings(activeWorkspace?.id, getToken);
   const { data: workspaceTasks, mutate: mutateTasks } = useWorkspaceTasks(activeWorkspace?.id, getToken);
   const { data: integrations, mutate: mutateIntegrations } = useWorkspaceIntegrations(activeWorkspace?.id, getToken);
+  const { data: workspaceAnalytics, mutate: mutateAnalytics } = useWorkspaceAnalytics(activeWorkspace?.id, getToken);
+  const { data: workspaceDocs } = useWorkspaceDocuments(activeWorkspace?.id, getToken);
   const { data: notifications } = useNotifications(getToken);
   const { data: searchResults, isValidating: searchLoading } = useSearch(debouncedSearchQuery, activeWorkspace?.id, getToken);
 
@@ -941,6 +956,38 @@ export const AppWorkspace: React.FC<AppWorkspaceProps> = ({ onBackToLanding }) =
     }
   };
 
+  // 5b. Rename Workspace
+  const handleRenameWorkspace = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!activeWorkspace || !workspaceRenameInput.trim()) return;
+
+    setSavingWorkspaceName(true);
+    try {
+      const updated = await updateWorkspaceApi(activeWorkspace.id, { name: workspaceRenameInput.trim() }, getToken);
+      showToast(`Workspace renamed to "${updated.name}"`);
+      setEditingWorkspaceName(false);
+      await mutateWorkspaces();
+    } catch (err: any) {
+      showToast(err.message || 'Failed to rename workspace', 'error');
+    } finally {
+      setSavingWorkspaceName(false);
+    }
+  };
+
+  // 5c. Remove Member from Workspace
+  const handleRemoveMember = async (userId: string, memberName: string) => {
+    if (!activeWorkspace) return;
+    if (!confirm(`Are you sure you want to remove ${memberName} from this workspace?`)) return;
+
+    try {
+      await removeWorkspaceMemberApi(activeWorkspace.id, userId, getToken);
+      showToast(`Removed ${memberName} from workspace`);
+      await mutateMembers();
+    } catch (err: any) {
+      showToast(err.message || 'Failed to remove member', 'error');
+    }
+  };
+
 
   // 5. Kanban Task Status Update with Optimistic UI and Rollback
   const handleTaskStatusChange = async (task: ApiTask, newStatus: TaskStatus) => {
@@ -1325,6 +1372,50 @@ export const AppWorkspace: React.FC<AppWorkspaceProps> = ({ onBackToLanding }) =
               <span className="hidden sm:inline">Meeting Detail</span>
             </button>
 
+            {/* Primary Divider */}
+            <div className="my-2 border-t border-[#27272A]" />
+
+            {/* 🧠 First-Class AI Knowledge / RAG */}
+            <button
+              onClick={() => setActiveTab('knowledge')}
+              className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-xs font-semibold transition-colors cursor-pointer ${
+                activeTab === 'knowledge'
+                  ? 'bg-[#8B5CF6] text-white shadow-md shadow-[#8B5CF6]/20'
+                  : 'text-slate-400 hover:text-white hover:bg-[#18181b]'
+              }`}
+            >
+              <div className="flex items-center gap-3 min-w-0">
+                <Brain className="w-4 h-4 shrink-0 text-[#a78bfa]" />
+                <span className="hidden sm:inline font-bold">AI Knowledge</span>
+              </div>
+              {workspaceDocs && workspaceDocs.length > 0 && (
+                <span className="hidden sm:inline-block px-1.5 py-0.5 rounded-full text-[9px] font-mono bg-[#27272A] text-slate-300">
+                  {workspaceDocs.length}
+                </span>
+              )}
+            </button>
+
+            {/* 🔎 First-Class Semantic Search */}
+            <button
+              onClick={() => setActiveTab('search')}
+              className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-xs font-semibold transition-colors cursor-pointer ${
+                activeTab === 'search'
+                  ? 'bg-[#8B5CF6] text-white shadow-md shadow-[#8B5CF6]/20'
+                  : 'text-slate-400 hover:text-white hover:bg-[#18181b]'
+              }`}
+            >
+              <div className="flex items-center gap-3 min-w-0">
+                <Search className="w-4 h-4 shrink-0 text-sky-400" />
+                <span className="hidden sm:inline font-bold">Semantic Search</span>
+              </div>
+              <span className="hidden sm:inline-block px-1.5 py-0.5 rounded-full text-[9px] font-mono bg-[#27272A] text-slate-400">
+                pgvector
+              </span>
+            </button>
+
+            {/* Secondary Divider */}
+            <div className="my-2 border-t border-[#27272A]" />
+
             <button
               onClick={() => setActiveTab('kanban')}
               className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-semibold transition-colors cursor-pointer ${
@@ -1335,18 +1426,6 @@ export const AppWorkspace: React.FC<AppWorkspaceProps> = ({ onBackToLanding }) =
             >
               <Kanban className="w-4 h-4 shrink-0" />
               <span className="hidden sm:inline">Action Items</span>
-            </button>
-
-            <button
-              onClick={() => setActiveTab('search')}
-              className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-semibold transition-colors cursor-pointer ${
-                activeTab === 'search'
-                  ? 'bg-[#8B5CF6] text-white shadow-md shadow-[#8B5CF6]/20'
-                  : 'text-slate-400 hover:text-white hover:bg-[#18181b]'
-              }`}
-            >
-              <Search className="w-4 h-4 shrink-0" />
-              <span className="hidden sm:inline">Global Search</span>
             </button>
 
             <button
@@ -1973,69 +2052,42 @@ export const AppWorkspace: React.FC<AppWorkspaceProps> = ({ onBackToLanding }) =
             </div>
           )}
 
-          {/* TAB 4: GLOBAL SEARCH */}
+          {/* TAB: 🧠 AI KNOWLEDGE / RAG */}
+          {activeTab === 'knowledge' && (
+            <div className="h-full flex-1 flex flex-col min-h-0 animate-fadeIn">
+              <AIKnowledgeView
+                activeWorkspace={activeWorkspace}
+                getToken={getToken}
+                onNavigateToMeeting={(meetingId, ts) => {
+                  setSelectedMeetingId(meetingId);
+                  setActiveTab('meeting');
+                  if (ts !== undefined) {
+                    setMeetingSubTab('transcript');
+                    handleSeekToTime(ts);
+                  }
+                }}
+                showToast={showToast}
+              />
+            </div>
+          )}
+
+          {/* TAB: 🔎 WORKSPACE SEMANTIC SEARCH */}
           {activeTab === 'search' && (
-            <div className="space-y-6 animate-fadeIn">
-              <div className="p-6 rounded-2xl bg-[#111113] border border-[#27272A] space-y-4">
-                <h2 className="text-2xl font-extrabold text-white">Global Semantic Search</h2>
-                <p className="text-xs text-slate-400">Search across meeting titles, transcript turns, tasks, and consensus decisions.</p>
-
-                <div className="relative">
-                  <Search className="w-5 h-5 text-slate-500 absolute left-4 top-3.5" />
-                  <input
-                    type="text"
-                    placeholder="Search terms (e.g. 'authentication', 'rate limiting', 'pricing', 'architecture')..."
-                    value={searchInput}
-                    onChange={(e) => setSearchInput(e.target.value)}
-                    className="w-full bg-[#18181b] border border-[#27272A] rounded-xl pl-12 pr-4 py-3 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-[#8B5CF6]"
-                  />
-                  {searchLoading && (
-                    <Loader2 className="w-4 h-4 text-[#8B5CF6] animate-spin absolute right-4 top-4" />
-                  )}
-                </div>
-              </div>
-
-              {/* Search Results */}
-              <div className="space-y-3">
-                <div className="text-xs font-mono uppercase text-slate-500">
-                  {searchResults?.results ? `${searchResults.results.length} matches found` : 'Search across workspace meetings'}
-                </div>
-
-                {searchResults?.results && searchResults.results.length > 0 ? (
-                  searchResults.results.map((item, idx) => (
-                    <div
-                      key={idx}
-                      onClick={() => {
-                        setSelectedMeetingId(item.meeting_id);
-                        setActiveTab('meeting');
-                        if (item.type === 'transcript') setMeetingSubTab('transcript');
-                        if (item.type === 'task') setMeetingSubTab('tasks');
-                        if (item.type === 'decision') setMeetingSubTab('summary');
-                      }}
-                      className="p-4 rounded-xl bg-[#111113] border border-[#27272A] space-y-2 hover:border-[#8B5CF6] transition-colors cursor-pointer"
-                    >
-                      <div className="flex items-center justify-between text-xs">
-                        <div className="flex items-center gap-2">
-                          <span className="font-bold text-[#8B5CF6]">{item.meeting_title}</span>
-                          <span className="px-1.5 py-0.5 rounded bg-[#27272A] text-[10px] font-mono uppercase text-slate-300">
-                            {item.type}
-                          </span>
-                        </div>
-                        {item.timestamp && (
-                          <span className="text-[10px] font-mono text-slate-500">@{item.timestamp}</span>
-                        )}
-                      </div>
-                      <p className="text-xs text-slate-300 leading-relaxed font-sans">
-                        "{item.snippet}"
-                      </p>
-                    </div>
-                  ))
-                ) : debouncedSearchQuery ? (
-                  <div className="p-8 text-center border border-dashed border-[#27272A] rounded-xl text-xs text-slate-500">
-                    No matching results found for "{debouncedSearchQuery}".
-                  </div>
-                ) : null}
-              </div>
+            <div className="h-full flex-1 flex flex-col min-h-0 animate-fadeIn">
+              <WorkspaceSemanticSearch
+                activeWorkspace={activeWorkspace}
+                getToken={getToken}
+                onNavigateToMeeting={(meetingId, ts) => {
+                  setSelectedMeetingId(meetingId);
+                  setActiveTab('meeting');
+                  if (ts !== undefined) {
+                    setMeetingSubTab('transcript');
+                    handleSeekToTime(ts);
+                  }
+                }}
+                onNavigateToTab={(tab) => setActiveTab(tab as any)}
+                showToast={showToast}
+              />
             </div>
           )}
 
@@ -2044,17 +2096,79 @@ export const AppWorkspace: React.FC<AppWorkspaceProps> = ({ onBackToLanding }) =
             <div className="space-y-6 animate-fadeIn">
               <div>
                 <h2 className="text-2xl font-extrabold text-white">Workspace Analytics</h2>
-                <p className="text-xs text-slate-400 mt-0.5">Real-time metrics computed from live meetings and transcript turns.</p>
+                <p className="text-xs text-slate-400 mt-0.5">Real-time metrics computed directly from PostgreSQL meeting intelligence and diarized audio turns.</p>
+              </div>
+
+              {/* 4-Card Executive Metric Strip */}
+              <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+                <div className="p-4 rounded-xl bg-[#111113] border border-[#27272A] space-y-1">
+                  <div className="text-[11px] font-mono uppercase text-slate-400">Total Meetings</div>
+                  <div className="text-2xl font-extrabold text-white font-mono">
+                    {workspaceAnalytics?.total_meetings ?? meetings?.length ?? 0}
+                  </div>
+                  <div className="text-[10px] text-emerald-400 font-mono">
+                    {workspaceAnalytics?.completed_meetings ?? 0} completed • {workspaceAnalytics?.processing_meetings ?? 0} in pipeline
+                  </div>
+                </div>
+
+                <div className="p-4 rounded-xl bg-[#111113] border border-[#27272A] space-y-1">
+                  <div className="text-[11px] font-mono uppercase text-slate-400">Speaking Time</div>
+                  <div className="text-2xl font-extrabold text-[#8B5CF6] font-mono">
+                    {workspaceAnalytics?.total_speaking_hours ?? 0} hrs
+                  </div>
+                  <div className="text-[10px] text-slate-400 font-mono">
+                    Avg {workspaceAnalytics?.avg_meeting_duration_minutes ?? 0}m per meeting
+                  </div>
+                </div>
+
+                <div className="p-4 rounded-xl bg-[#111113] border border-[#27272A] space-y-1">
+                  <div className="text-[11px] font-mono uppercase text-slate-400">Decisions Reached</div>
+                  <div className="text-2xl font-extrabold text-sky-400 font-mono">
+                    {workspaceAnalytics?.total_decisions ?? 0}
+                  </div>
+                  <div className="text-[10px] text-slate-400 font-mono">
+                    Consensus points recorded
+                  </div>
+                </div>
+
+                <div className="p-4 rounded-xl bg-[#111113] border border-[#27272A] space-y-1">
+                  <div className="text-[11px] font-mono uppercase text-slate-400">Task Completion</div>
+                  <div className="text-2xl font-extrabold text-emerald-400 font-mono">
+                    {workspaceAnalytics?.task_completion_rate ?? 0}%
+                  </div>
+                  <div className="text-[10px] text-slate-400 font-mono">
+                    {workspaceAnalytics?.completed_tasks ?? tasksByStatus.done.length} of {workspaceAnalytics?.total_tasks ?? workspaceTasks?.length ?? 0} items resolved
+                  </div>
+                </div>
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 {/* Speaking Time Distribution */}
                 <div className="p-6 rounded-2xl bg-[#111113] border border-[#27272A] space-y-4">
-                  <h3 className="text-sm font-bold text-white uppercase tracking-wider">
-                    Speaker Turn Distribution {meetingDetail?.title ? `(${meetingDetail.title})` : ''}
-                  </h3>
+                  <div className="flex items-center justify-between">
+                    <h3 className="text-sm font-bold text-white uppercase tracking-wider">
+                      Speaker Airtime Distribution
+                    </h3>
+                    <span className="text-[10px] font-mono text-slate-500">Workspace Aggregate</span>
+                  </div>
 
-                  {analyticsSpeakerStats.length > 0 ? (
+                  {workspaceAnalytics?.speakers_distribution && workspaceAnalytics.speakers_distribution.length > 0 ? (
+                    <div className="space-y-3 pt-2">
+                      {workspaceAnalytics.speakers_distribution.map((stat, idx) => (
+                        <div key={idx} className="space-y-1">
+                          <div className="flex justify-between text-xs">
+                            <span className="text-slate-300 font-semibold">{stat.speaker}</span>
+                            <span className="text-[#8B5CF6] font-mono font-bold">
+                              {stat.percentage}% ({Math.round(stat.duration_seconds / 60)} min • {stat.turn_count} turns)
+                            </span>
+                          </div>
+                          <div className="w-full h-2 rounded-full bg-[#18181b] overflow-hidden">
+                            <div className="h-full bg-[#8B5CF6]" style={{ width: `${stat.percentage}%` }} />
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : analyticsSpeakerStats.length > 0 ? (
                     <div className="space-y-3 pt-2">
                       {analyticsSpeakerStats.map((stat, idx) => (
                         <div key={idx} className="space-y-1">
@@ -2071,32 +2185,41 @@ export const AppWorkspace: React.FC<AppWorkspaceProps> = ({ onBackToLanding }) =
                       ))}
                     </div>
                   ) : (
-                    <p className="text-xs text-slate-500 italic">Select a completed meeting to view speaker distribution.</p>
+                    <p className="text-xs text-slate-500 italic">No diarized audio segments recorded in this workspace yet.</p>
                   )}
                 </div>
 
                 {/* Action Item Breakdown */}
                 <div className="p-6 rounded-2xl bg-[#111113] border border-[#27272A] space-y-4">
-                  <h3 className="text-sm font-bold text-white uppercase tracking-wider">Task Completion Breakdown</h3>
-                  <div className="space-y-4 pt-2">
+                  <h3 className="text-sm font-bold text-white uppercase tracking-wider">Action Items & Kanban State</h3>
+                  <div className="space-y-3 pt-2">
                     <div className="flex items-center justify-between text-xs p-3 rounded-xl bg-[#18181b] border border-[#27272A]">
                       <span className="text-slate-300">Total Action Items</span>
-                      <span className="font-mono font-bold text-white">{workspaceTasks?.length || 0}</span>
+                      <span className="font-mono font-bold text-white">{workspaceAnalytics?.total_tasks ?? workspaceTasks?.length ?? 0}</span>
                     </div>
 
                     <div className="flex items-center justify-between text-xs p-3 rounded-xl bg-[#18181b] border border-[#27272A]">
-                      <span className="text-slate-300">Completed Tasks</span>
-                      <span className="font-mono font-bold text-emerald-400">{tasksByStatus.done.length}</span>
+                      <div className="flex items-center gap-2">
+                        <span className="w-2 h-2 rounded-full bg-emerald-400" />
+                        <span className="text-slate-300">Completed (Done)</span>
+                      </div>
+                      <span className="font-mono font-bold text-emerald-400">{workspaceAnalytics?.completed_tasks ?? tasksByStatus.done.length}</span>
                     </div>
 
                     <div className="flex items-center justify-between text-xs p-3 rounded-xl bg-[#18181b] border border-[#27272A]">
-                      <span className="text-slate-300">In Progress (Doing)</span>
-                      <span className="font-mono font-bold text-[#8B5CF6]">{tasksByStatus.doing.length}</span>
+                      <div className="flex items-center gap-2">
+                        <span className="w-2 h-2 rounded-full bg-[#8B5CF6]" />
+                        <span className="text-slate-300">In Progress (Doing)</span>
+                      </div>
+                      <span className="font-mono font-bold text-[#8B5CF6]">{workspaceAnalytics?.in_progress_tasks ?? tasksByStatus.doing.length}</span>
                     </div>
 
                     <div className="flex items-center justify-between text-xs p-3 rounded-xl bg-[#18181b] border border-[#27272A]">
-                      <span className="text-slate-300">To Do</span>
-                      <span className="font-mono font-bold text-amber-400">{tasksByStatus.todo.length}</span>
+                      <div className="flex items-center gap-2">
+                        <span className="w-2 h-2 rounded-full bg-amber-400" />
+                        <span className="text-slate-300">To Do</span>
+                      </div>
+                      <span className="font-mono font-bold text-amber-400">{workspaceAnalytics?.todo_tasks ?? tasksByStatus.todo.length}</span>
                     </div>
                   </div>
                 </div>
@@ -2142,9 +2265,20 @@ export const AppWorkspace: React.FC<AppWorkspaceProps> = ({ onBackToLanding }) =
                           <div className="text-[11px] text-slate-400">{m.email}</div>
                         </div>
                       </div>
-                      <span className="text-[10px] font-mono px-2.5 py-1 rounded bg-[#8B5CF6]/20 text-[#8B5CF6] font-bold uppercase">
-                        {m.role}
-                      </span>
+                      <div className="flex items-center gap-3">
+                        <span className="text-[10px] font-mono px-2.5 py-1 rounded bg-[#8B5CF6]/20 text-[#8B5CF6] font-bold uppercase">
+                          {m.role}
+                        </span>
+                        {m.role !== 'owner' && (
+                          <button
+                            onClick={() => handleRemoveMember(m.user_id, m.name)}
+                            title="Remove member from workspace"
+                            className="p-1.5 rounded-lg text-slate-500 hover:text-rose-400 hover:bg-rose-950/20 transition-colors cursor-pointer"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        )}
+                      </div>
                     </div>
                   ))}
                 </div>
@@ -2497,7 +2631,44 @@ export const AppWorkspace: React.FC<AppWorkspaceProps> = ({ onBackToLanding }) =
                           </div>
                           <div>
                             <span className="text-slate-500 font-mono">Workspace Name:</span>
-                            <div className="text-white font-bold mt-1">{activeWorkspace?.name}</div>
+                            {editingWorkspaceName ? (
+                              <form onSubmit={handleRenameWorkspace} className="flex items-center gap-2 mt-1">
+                                <input
+                                  type="text"
+                                  value={workspaceRenameInput}
+                                  onChange={(e) => setWorkspaceRenameInput(e.target.value)}
+                                  className="px-3 py-1.5 rounded-lg bg-[#18181b] border border-[#8B5CF6] text-xs text-white focus:outline-none"
+                                  autoFocus
+                                />
+                                <button
+                                  type="submit"
+                                  disabled={savingWorkspaceName}
+                                  className="px-3 py-1.5 rounded-lg bg-[#8B5CF6] hover:bg-[#7c3aed] text-white text-xs font-bold transition-colors cursor-pointer"
+                                >
+                                  {savingWorkspaceName ? 'Saving...' : 'Save'}
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => setEditingWorkspaceName(false)}
+                                  className="px-3 py-1.5 rounded-lg bg-[#27272A] hover:bg-[#3f3f46] text-slate-300 text-xs transition-colors cursor-pointer"
+                                >
+                                  Cancel
+                                </button>
+                              </form>
+                            ) : (
+                              <div className="flex items-center gap-2 mt-1">
+                                <span className="text-white font-bold">{activeWorkspace?.name}</span>
+                                <button
+                                  onClick={() => {
+                                    setWorkspaceRenameInput(activeWorkspace?.name || '');
+                                    setEditingWorkspaceName(true);
+                                  }}
+                                  className="text-[11px] text-[#8B5CF6] hover:underline font-mono cursor-pointer"
+                                >
+                                  Rename
+                                </button>
+                              </div>
+                            )}
                           </div>
                           <div>
                             <span className="text-slate-500 font-mono">Total Meetings:</span>
