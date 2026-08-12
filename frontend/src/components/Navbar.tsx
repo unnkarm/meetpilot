@@ -3,6 +3,8 @@ import { Bot, Github, Sparkles, Menu, X, ArrowRight } from 'lucide-react';
 import { SignedIn, SignedOut, UserButton } from '@clerk/clerk-react';
 
 
+import { MeetPilotLogo } from './Logo';
+
 interface NavbarProps {
   onOpenGetStarted: () => void;
   onOpenWatchDemo: () => void;
@@ -37,21 +39,8 @@ export const Navbar: React.FC<NavbarProps> = ({
     <header className="sticky top-0 z-50 backdrop-blur-xl bg-[#09090B]/90 border-b border-[#27272A] transition-all">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
         {/* Brand Logo */}
-        <div className="flex items-center gap-3 cursor-pointer group" onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}>
-          <div className="relative flex items-center justify-center w-9 h-9 rounded-xl bg-[#8B5CF6] p-[1px] shadow-lg shadow-[#8B5CF6]/20 group-hover:shadow-[#8B5CF6]/40 transition-all duration-300">
-            <div className="w-full h-full bg-[#111113] rounded-[11px] flex items-center justify-center">
-              <Bot className="w-5 h-5 text-[#8B5CF6] group-hover:scale-110 transition-transform duration-300" />
-            </div>
-            <div className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-emerald-400 rounded-full border-2 border-[#09090B] animate-pulse" />
-          </div>
-          <div className="flex items-center gap-2">
-            <span className="font-extrabold text-lg tracking-tight text-[#FAFAFA]">
-              MeetPilot
-            </span>
-            <span className="px-1.5 py-0.5 text-[10px] font-mono rounded-md bg-[#8B5CF6]/15 text-[#8B5CF6] border border-[#8B5CF6]/30 font-bold uppercase">
-              AI
-            </span>
-          </div>
+        <div className="flex items-center cursor-pointer" onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}>
+          <MeetPilotLogo className="h-9" />
         </div>
 
         {/* Desktop Navigation Links */}

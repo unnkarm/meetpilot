@@ -1,6 +1,5 @@
-import React from 'react';
-import { useAuth, SignIn } from '@clerk/clerk-react';
-import { Bot, Loader2, Shield } from 'lucide-react';
+import { Loader2, Shield } from 'lucide-react';
+import { MeetPilotLogo } from './Logo';
 import { CLERK_APPEARANCE } from './AuthModal';
 
 interface ProtectedRouteProps {
@@ -21,11 +20,7 @@ export const ProtectedRoute: React.FC<ProtectedRouteProps> = ({ children }) => {
   if (!isLoaded) {
     return (
       <div className="min-h-screen bg-[#09090B] flex items-center justify-center flex-col gap-4">
-        <div className="w-12 h-12 rounded-xl bg-[#8B5CF6] p-px shadow-lg shadow-[#8B5CF6]/30">
-          <div className="w-full h-full bg-[#121217] rounded-[11px] flex items-center justify-center">
-            <Bot className="w-6 h-6 text-[#8B5CF6]" />
-          </div>
-        </div>
+        <MeetPilotLogo className="h-14 justify-center" iconOnly={true} />
         <div className="flex items-center gap-2">
           <Loader2 className="w-4 h-4 text-[#8B5CF6] animate-spin" />
           <p className="text-xs text-slate-400 font-mono">Verifying secure session...</p>
@@ -53,17 +48,7 @@ export const ProtectedRoute: React.FC<ProtectedRouteProps> = ({ children }) => {
             
             {/* Top Brand Header */}
             <div className="flex items-center justify-between pb-4 mb-4 border-b border-[#272733]/80 relative z-10">
-              <div className="flex items-center gap-2.5">
-                <div className="w-8 h-8 rounded-xl bg-[#8B5CF6] p-px shadow-md shadow-[#8B5CF6]/30">
-                  <div className="w-full h-full bg-[#121217] rounded-[11px] flex items-center justify-center">
-                    <Bot className="w-4 h-4 text-[#8B5CF6]" />
-                  </div>
-                </div>
-                <div>
-                  <span className="font-extrabold text-sm text-white tracking-tight block">MeetPilot AI</span>
-                  <span className="text-[11px] text-slate-400 font-medium">Smart Meeting Intelligence</span>
-                </div>
-              </div>
+              <MeetPilotLogo className="h-8" />
               <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-[#8B5CF6]/10 border border-[#8B5CF6]/20 text-[10px] font-semibold text-[#A78BFA]">
                 <Shield className="w-3 h-3 text-[#8B5CF6]" />
                 <span>Protected Workspace</span>

@@ -1,5 +1,6 @@
 import React from 'react';
-import { X, Bot, Target, Compass, Cpu, ArrowRight, CheckCircle2 } from 'lucide-react';
+import { X, Target, Compass, Cpu, ArrowRight, CheckCircle2 } from 'lucide-react';
+import { MeetPilotLogo } from './Logo';
 import { TECH_STACK } from '../data/landingData';
 
 interface AboutModalProps {
@@ -25,11 +26,7 @@ export const AboutModal: React.FC<AboutModalProps> = ({ isOpen, onClose, onOpenG
 
         {/* Header */}
         <div className="text-center space-y-3">
-          <div className="w-12 h-12 rounded-2xl bg-[#8B5CF6] p-[1px] mx-auto">
-            <div className="w-full h-full bg-[#0d0e17] rounded-[15px] flex items-center justify-center">
-              <Bot className="w-6 h-6 text-[#8B5CF6]" />
-            </div>
-          </div>
+          <MeetPilotLogo className="h-14 justify-center" iconOnly={true} />
 
           <h3 className="text-3xl font-extrabold text-white">
             About MeetPilot AI

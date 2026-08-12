@@ -1,6 +1,6 @@
-import React from 'react';
-import { X, Bot, Shield, AlertTriangle } from 'lucide-react';
+import { X, Shield, AlertTriangle } from 'lucide-react';
 import { SignIn, SignUp } from '@clerk/clerk-react';
+import { MeetPilotLogo } from './Logo';
 
 interface AuthModalProps {
   isOpen: boolean;
@@ -127,14 +127,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
             
             {/* Top Brand Pill */}
             <div className="flex items-center justify-between pb-3.5 mb-2 border-b border-[#272733]/70">
-              <div className="flex items-center gap-2">
-                <div className="w-7 h-7 rounded-xl bg-[#8B5CF6] p-px shadow-md shadow-[#8B5CF6]/30">
-                  <div className="w-full h-full bg-[#121217] rounded-[10px] flex items-center justify-center">
-                    <Bot className="w-3.5 h-3.5 text-[#8B5CF6]" />
-                  </div>
-                </div>
-                <span className="font-extrabold text-sm text-white tracking-tight">MeetPilot AI</span>
-              </div>
+              <MeetPilotLogo className="h-6" />
             </div>
 
             {/* Embedded Clerk Form */}
