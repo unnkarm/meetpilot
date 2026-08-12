@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { X, Upload, Sparkles, CheckCircle2, ArrowRight, FileAudio, Bot } from 'lucide-react';
+import { X, Upload, Sparkles, CheckCircle2, ArrowRight, FileAudio } from 'lucide-react';
+import { MeetPilotLogo } from './Logo';
 
 interface GetStartedModalProps {
   isOpen: boolean;
@@ -51,11 +51,7 @@ export const GetStartedModal: React.FC<GetStartedModalProps> = ({
 
         {/* Modal Header */}
         <div className="text-center space-y-2 mb-6">
-          <div className="w-12 h-12 rounded-2xl bg-gradient-to-tr from-indigo-500 to-purple-600 p-[1px] mx-auto mb-3">
-            <div className="w-full h-full bg-[#0d0e17] rounded-[15px] flex items-center justify-center">
-              <Bot className="w-6 h-6 text-indigo-400" />
-            </div>
-          </div>
+          <MeetPilotLogo className="h-14 justify-center mb-3" iconOnly={true} />
 
           <h3 className="text-2xl font-extrabold text-white">
             Get Started with MeetPilot AI
