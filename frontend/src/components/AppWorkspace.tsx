@@ -54,6 +54,7 @@ import {
 } from 'lucide-react';
 
 import { useUser, useClerk, useAuth } from '@clerk/clerk-react';
+import { MeetPilotLogo } from './Logo';
 import {
   TaskPriority,
   TaskStatus,
@@ -1193,13 +1194,10 @@ export const AppWorkspace: React.FC<AppWorkspaceProps> = ({ onBackToLanding }) =
         <div className="flex items-center gap-3 sm:gap-4">
           <button
             onClick={onBackToLanding}
-            className="group relative flex items-center justify-center w-9 h-9 rounded-xl bg-gradient-to-tr from-[#8B5CF6] to-[#A78BFA] p-[1px] shadow-lg shadow-[#8B5CF6]/20 hover:shadow-[#8B5CF6]/40 transition-all duration-300 cursor-pointer active:scale-95"
+            className="flex items-center justify-center h-10 hover:scale-105 active:scale-95 transition-transform duration-200 cursor-pointer"
             title="Return to Home / Landing Page"
           >
-            <div className="w-full h-full bg-[#111113] rounded-[11px] flex items-center justify-center group-hover:bg-[#181822] transition-colors">
-              <Bot className="w-5 h-5 text-[#8B5CF6] group-hover:scale-110 transition-transform duration-300" />
-            </div>
-            <div className="absolute -top-0.5 -right-0.5 w-2.5 h-2.5 bg-emerald-400 rounded-full border-2 border-[#09090B] animate-pulse" />
+            <MeetPilotLogo className="h-9" iconOnly={true} />
           </button>
 
           <div className="h-4 w-px bg-gradient-to-b from-transparent via-[#3F3F50] to-transparent hidden sm:block mx-0.5" />

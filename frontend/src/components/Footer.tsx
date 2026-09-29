@@ -1,5 +1,4 @@
-import React from 'react';
-import { Bot, Github, Heart } from 'lucide-react';
+import { MeetPilotLogo } from './Logo';
 
 interface FooterProps {
   onOpenPrivacy: () => void;
@@ -23,14 +22,7 @@ export const Footer: React.FC<FooterProps> = ({ onOpenPrivacy, onOpenDocs, onOpe
           
           {/* Brand Info */}
           <div className="md:col-span-5 space-y-4">
-            <div className="flex items-center gap-3">
-              <div className="w-8 h-8 rounded-xl bg-[#8B5CF6] p-[1px]">
-                <div className="w-full h-full bg-[#111113] rounded-[11px] flex items-center justify-center">
-                  <Bot className="w-4 h-4 text-[#8B5CF6]" />
-                </div>
-              </div>
-              <span className="font-extrabold text-lg text-[#FAFAFA] tracking-tight">MeetPilot AI</span>
-            </div>
+            <MeetPilotLogo className="h-8" />
 
             <p className="text-slate-400 max-w-sm leading-relaxed">
               The AI meeting intelligence platform that turns team conversations into searchable transcripts, concise summaries, and automated task execution.

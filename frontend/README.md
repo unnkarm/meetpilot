@@ -80,4 +80,3 @@ The frontend communicates with the **MeetPilot AI FastAPI backend** for authenti
 ### 🎙️ MeetPilot AI
 
 **Turn every conversation into progress.**
-
