@@ -23,7 +23,7 @@ from sqlalchemy.sql import func
 
 from app.database.base import Base
 
-# text-embedding-004 produces 768-dimensional vectors.
+# The selected multilingual embedding model uses the existing 768-dimensional schema.
 EMBEDDING_DIM = 768
 
 
@@ -39,7 +39,9 @@ class TranscriptSegment(Base):
     start_time: Mapped[float] = mapped_column(Float, nullable=False)
     end_time: Mapped[float] = mapped_column(Float, nullable=False)
     text: Mapped[str] = mapped_column(Text, nullable=False)
+    language_code: Mapped[str | None] = mapped_column(String(12), nullable=True)
     embedding: Mapped[list[float] | None] = mapped_column(Vector(EMBEDDING_DIM), nullable=True)
+    embedding_model: Mapped[str | None] = mapped_column(String(255), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     meeting = relationship("Meeting", back_populates="transcript_segments")

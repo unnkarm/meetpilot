@@ -21,6 +21,7 @@ class WorkspaceOut(BaseModel):
     id: uuid.UUID
     name: str
     owner_id: uuid.UUID
+    is_demo: bool = False
     created_at: datetime
 
 

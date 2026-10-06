@@ -16,6 +16,8 @@ class DocumentOut(BaseModel):
     status: str
     failure_reason: Optional[str] = None
     chunk_count: int
+    language_code: Optional[str] = None
+    language_confidence: Optional[float] = None
     created_at: datetime
     updated_at: datetime
 
@@ -26,7 +28,7 @@ class DocumentUploadResponse(BaseModel):
 
 
 class KnowledgeCitation(BaseModel):
-    type: str  # "document" | "meeting"
+    type: str  # document | meeting | task | decision
     title: str
     document_id: Optional[str] = None
     meeting_id: Optional[str] = None
