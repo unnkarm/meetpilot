@@ -1,16 +1,19 @@
 import logging
-import os
+from abc import ABC, abstractmethod
+from collections import defaultdict
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, TypedDict
 
+from app.core.app_config import APP_CONFIG
 from app.core.config import settings
+from app.services.language_detection import detect_text_language, language_label
 from app.services.audio_chunker import (
     OVERLAP_MS,
     cleanup_temp_chunks,
     dedupe_overlap_segments,
     split_audio,
 )
-from app.services.gemini_client import generate_json
 
 logger = logging.getLogger(__name__)
 
@@ -26,6 +29,7 @@ _GEMINI_SCHEMA = {
                     "start_time": {"type": "number"},
                     "end_time": {"type": "number"},
                     "text": {"type": "string"},
+                    "language_code": {"type": "string"},
                 },
                 "required": ["speaker", "start_time", "end_time", "text"],
             },
@@ -45,20 +49,62 @@ _GEMINI_SYSTEM_INSTRUCTION = (
     "Identify distinct speakers and label them consistently as 'Speaker 1', 'Speaker 2', etc., "
     "in order of appearance, unless a speaker introduces themselves by name in the audio, "
     "in which case use their actual name. Give start_time and end_time for every segment in "
-    "seconds (floats) relative to the start of this audio chunk. Do not omit any spoken content."
+    "seconds (floats) relative to the start of this audio chunk. Preserve the original spoken "
+    "language and code-switching verbatim; never translate into English. Do not omit spoken content."
 )
 
 
-class TranscriptSegmentDict(TypedDict):
+class TranscriptSegmentDict(TypedDict, total=False):
     speaker: str
     start_time: float
     end_time: float
     text: str
+    language_code: str | None
+
+
+@dataclass
+class TranscriptionResult:
+    segments: list[TranscriptSegmentDict]
+    language_code: str | None = None
+    language_confidence: float | None = None
+    is_multilingual: bool = False
+    language_name: str | None = None
+
+
+class TranscriptionProvider(ABC):
+    supports_multilingual = True
+    supports_diarization = False
+
+    @abstractmethod
+    def transcribe(self, audio_path: Path, meeting_id: str) -> TranscriptionResult:
+        raise NotImplementedError
+
+    def supports_language(self, code: str) -> bool:
+        try:
+            from faster_whisper.tokenizer import _LANGUAGE_CODES
+        except ImportError:
+            return False
+        return code.casefold() in _LANGUAGE_CODES
+
+    def detect_language(self, result: TranscriptionResult) -> str | None:
+        return result.language_code
+
+
+def _primary_audio_language(scores: dict[str, float], total: float) -> tuple[str | None, float | None, bool]:
+    if not scores or total <= 0:
+        return None, None, False
+    ranked = sorted(scores.items(), key=lambda pair: pair[1], reverse=True)
+    code, score = ranked[0]
+    share = score / total
+    mixed = len(ranked) > 1 and ranked[1][1] / total >= 0.15
+    if share < APP_CONFIG.language.minimum_confidence:
+        return None, None, mixed
+    return code, round(share, 3), mixed
 
 
 def build_diarization_prompt(known_speakers: list[str]) -> str:
     """Constructs a speaker-continuity prompt passing known speaker labels across sequential chunks."""
-    base = "Transcribe this meeting recording with speaker segmentation and timestamps."
+    base = "Transcribe original-language speech, including code-switching, with speaker segmentation and timestamps."
     if known_speakers:
         base += (
             " These speakers were already identified earlier in this same meeting — reuse the "
@@ -68,49 +114,63 @@ def build_diarization_prompt(known_speakers: list[str]) -> str:
     return base
 
 
-def _transcribe_local_audio(audio_path: Path) -> list[TranscriptSegmentDict]:
-    """Transcribes audio using a zero-cost local speech recognition pipeline.
-
-    Extracts acoustic speaker turns and speech content locally without consuming external API calls.
-    """
+def _transcribe_local_audio(audio_path: Path) -> TranscriptionResult:
+    """Run real local Whisper ASR. Unknown speaker identity is labelled conservatively."""
     try:
-        from pydub import AudioSegment
-        from pydub.silence import split_on_silence
+        from faster_whisper import WhisperModel
+    except ImportError as exc:
+        raise RuntimeError("Local transcription requires faster-whisper") from exc
 
-        sound = AudioSegment.from_file(str(audio_path))
-        duration_s = len(sound) / 1000.0
-
-        # Segment based on conversational pauses (>600ms silence)
-        chunks = split_on_silence(sound, min_silence_len=600, silence_thresh=-36, keep_silence=250)
-        if not chunks:
-            chunks = [sound]
-
-        segments: list[TranscriptSegmentDict] = []
-        cur_t = 0.0
-
-        for i, ch in enumerate(chunks):
-            ch_len = len(ch) / 1000.0
-            end_t = min(cur_t + ch_len, duration_s)
-            speaker_label = f"Speaker {(i % 3) + 1}"
-            text = f"Discussion turn {i + 1} regarding meeting deliverables and architecture sync."
-
-            segments.append(
-                TranscriptSegmentDict(
-                    speaker=speaker_label,
-                    start_time=round(cur_t, 2),
-                    end_time=round(end_t, 2),
-                    text=text,
-                )
+    cfg = APP_CONFIG.transcription
+    if cfg.model.endswith(".en") and APP_CONFIG.language.multilingual_transcription:
+        raise RuntimeError("The configured Whisper checkpoint is English-only; select a multilingual checkpoint")
+    language_hint = APP_CONFIG.language.default_language
+    language_hint = None if language_hint == "auto" else language_hint
+    model = WhisperModel(cfg.model, device=cfg.device, compute_type=cfg.compute_type)
+    chunks = split_audio(
+        audio_path,
+        meeting_id=audio_path.stem,
+        chunk_length_ms=cfg.chunk_seconds * 1000,
+        overlap_ms=cfg.overlap_seconds * 1000,
+    )
+    rows: list[dict[str, Any]] = []
+    language_scores: dict[str, float] = defaultdict(float)
+    total_speech = 0.0
+    try:
+        for chunk in chunks:
+            offset = chunk["start_offset_ms"] / 1000.0
+            segments, info = model.transcribe(
+                str(chunk["path"]), vad_filter=True, beam_size=5,
+                language=language_hint, task="transcribe",
+                multilingual=APP_CONFIG.language.multilingual_transcription,
+                condition_on_previous_text=False,
             )
-            cur_t = end_t
+            chunk_duration = 0.0
+            for segment in segments:
+                content = segment.text.strip()
+                if content:
+                    chunk_duration += max(0.0, float(segment.end) - float(segment.start))
+                    rows.append({
+                        "speaker": "Speaker 1",
+                        "start_time": round(float(segment.start) + offset, 3),
+                        "end_time": round(float(segment.end) + offset, 3),
+                        "text": content,
+                    })
+            code = getattr(info, "language", None)
+            confidence = float(getattr(info, "language_probability", 0.0) or 0.0)
+            total_speech += chunk_duration
+            if APP_CONFIG.language.enable_detection and code and confidence >= APP_CONFIG.language.minimum_confidence:
+                language_scores[code] += chunk_duration * confidence
+    finally:
+        cleanup_temp_chunks(chunks)
+    code, confidence, mixed = _primary_audio_language(language_scores, total_speech)
+    return TranscriptionResult(
+        segments=[TranscriptSegmentDict(**row) for row in dedupe_overlap_segments(rows, cfg.overlap_seconds)],
+        language_code=code, language_confidence=confidence, is_multilingual=mixed,
+    )
 
-        return segments
-    except Exception as exc:
-        logger.warning("Local audio chunking fallback: %s", exc)
-        return []
 
-
-def _transcribe_hf_space(audio_path: Path, meeting_id: str) -> list[TranscriptSegmentDict]:
+def _transcribe_hf_space(audio_path: Path, meeting_id: str) -> TranscriptionResult:
     """Transcribes audio via Hugging Face ZeroGPU Gradio Space (faster-whisper + pyannote diarization).
 
     Supports direct single-pass audio requests or chunked execution for extra-long recordings.
@@ -127,6 +187,8 @@ def _transcribe_hf_space(audio_path: Path, meeting_id: str) -> list[TranscriptSe
 
     chunks = split_audio(audio_path, meeting_id=meeting_id)
     all_segments: list[dict[str, Any]] = []
+    language_scores: dict[str, float] = defaultdict(float)
+    total_speech = 0.0
 
     try:
         for idx, chunk in enumerate(chunks):
@@ -145,7 +207,7 @@ def _transcribe_hf_space(audio_path: Path, meeting_id: str) -> list[TranscriptSe
                 audio_file=handle_file(str(chunk_path)),
                 min_speakers=None,
                 max_speakers=None,
-                language=None,
+                language=None if APP_CONFIG.language.default_language == "auto" else APP_CONFIG.language.default_language,
                 api_name="/transcribe",
             )
 
@@ -154,28 +216,40 @@ def _transcribe_hf_space(audio_path: Path, meeting_id: str) -> list[TranscriptSe
                 raise ValueError(f"Unexpected response format from HF Space: {type(result)}")
 
             for seg in chunk_segments:
-                seg["start_time"] = round(float(seg["start_time"]) + offset_seconds, 3)
-                seg["end_time"] = round(float(seg["end_time"]) + offset_seconds, 3)
-                all_segments.append(seg)
+                normalized = dict(seg)
+                normalized["start_time"] = round(float(seg["start_time"]) + offset_seconds, 3)
+                normalized["end_time"] = round(float(seg["end_time"]) + offset_seconds, 3)
+                all_segments.append(normalized)
+            if isinstance(result, dict) and APP_CONFIG.language.enable_detection:
+                code = result.get("language")
+                confidence = float(result.get("language_confidence") or 0.0)
+                speech = sum(max(0.0, float(s["end_time"]) - float(s["start_time"])) for s in chunk_segments)
+                total_speech += speech
+                if code and confidence >= APP_CONFIG.language.minimum_confidence:
+                    language_scores[code] += speech * confidence
 
     finally:
         cleanup_temp_chunks(chunks)
 
     final_segments = dedupe_overlap_segments(all_segments, overlap_seconds=OVERLAP_MS / 1000.0)
 
-    return [
+    segments = [
         TranscriptSegmentDict(
             speaker=s.get("speaker", "Speaker 1"),
             start_time=float(s.get("start_time", 0.0)),
             end_time=float(s.get("end_time", 0.0)),
             text=s.get("text", ""),
+            language_code=s.get("language_code"),
         )
         for s in final_segments
     ]
+    code, confidence, mixed = _primary_audio_language(language_scores, total_speech)
+    return TranscriptionResult(segments, code, confidence, mixed)
 
 
-def _transcribe_gemini(audio_path: Path, meeting_id: str) -> list[TranscriptSegmentDict]:
+def _transcribe_gemini(audio_path: Path, meeting_id: str) -> TranscriptionResult:
     """Transcribes audio using sequential Gemini audio understanding + diarization."""
+    from app.services.gemini_client import generate_json
     chunks = split_audio(audio_path, meeting_id=meeting_id)
     known_speakers: list[str] = []
     all_segments: list[dict[str, Any]] = []
@@ -219,70 +293,79 @@ def _transcribe_gemini(audio_path: Path, meeting_id: str) -> list[TranscriptSegm
 
     final_segments = dedupe_overlap_segments(all_segments, overlap_seconds=OVERLAP_MS / 1000.0)
 
-    return [
+    return TranscriptionResult([
         TranscriptSegmentDict(
             speaker=s.get("speaker", "Speaker 1"),
             start_time=float(s.get("start_time", 0.0)),
             end_time=float(s.get("end_time", 0.0)),
             text=s.get("text", ""),
+            language_code=s.get("language_code"),
         )
         for s in final_segments
-    ]
+    ])
+
+
+class LocalWhisperProvider(TranscriptionProvider):
+    def transcribe(self, audio_path: Path, meeting_id: str) -> TranscriptionResult:
+        return _transcribe_local_audio(audio_path)
+
+
+class HuggingFaceDiarizationProvider(TranscriptionProvider):
+    supports_diarization = True
+
+    def transcribe(self, audio_path: Path, meeting_id: str) -> TranscriptionResult:
+        return _transcribe_hf_space(audio_path, meeting_id)
+
+
+class GeminiTranscriptionProvider(TranscriptionProvider):
+    supports_diarization = True
+
+    def transcribe(self, audio_path: Path, meeting_id: str) -> TranscriptionResult:
+        if not settings.GEMINI_API_KEY:
+            raise RuntimeError("Gemini transcription selected without GEMINI_API_KEY")
+        return _transcribe_gemini(audio_path, meeting_id)
+
+
+def get_transcription_provider() -> TranscriptionProvider:
+    providers = {
+        "local": LocalWhisperProvider,
+        "huggingface": HuggingFaceDiarizationProvider,
+        "gemini": GeminiTranscriptionProvider,
+    }
+    try:
+        return providers[APP_CONFIG.transcription.provider]()
+    except KeyError as exc:
+        raise RuntimeError(f"Unsupported transcription provider: {APP_CONFIG.transcription.provider}") from exc
+
+
+def transcribe_audio_with_metadata(audio_path: Path, meeting_id: str | None = None) -> TranscriptionResult:
+    """Transcribe original speech, retaining provider and text language evidence."""
+    m_id = meeting_id or audio_path.stem
+    result = get_transcription_provider().transcribe(audio_path, m_id)
+    if isinstance(result, list):  # Compatibility with existing provider adapters.
+        result = TranscriptionResult(result)
+    if not result.segments:
+        raise RuntimeError(f"Transcription produced no speech for meeting {m_id}")
+    if APP_CONFIG.language.enable_detection:
+        full_text = " ".join(segment["text"] for segment in result.segments)
+        text_detection = detect_text_language(full_text)
+        if result.language_code is None and text_detection.code:
+            result.language_code = text_detection.code
+            result.language_confidence = text_detection.confidence
+        segment_languages: set[str] = set()
+        for segment in result.segments:
+            if segment.get("language_code"):
+                segment_languages.add(segment["language_code"])
+                continue
+            detected = detect_text_language(segment["text"])
+            segment["language_code"] = detected.code
+            if detected.code:
+                segment_languages.add(detected.code)
+        result.is_multilingual = result.is_multilingual or len(segment_languages) > 1
+    result.language_name = language_label(result.language_code)
+    return result
 
 
 def transcribe_audio(audio_path: Path, meeting_id: str | None = None) -> list[TranscriptSegmentDict]:
-    """Primary meeting transcription entrypoint.
-
-    Execution precedence:
-    1. Hugging Face ZeroGPU Space (faster-whisper + pyannote diarization) when configured.
-    2. Fallback to Google Gemini ASR + Diarization if HF Space fails, times out, or is unconfigured.
-    3. Zero-cost local silence chunker fallback if Gemini is unconfigured/fails.
-    """
-    m_id = meeting_id or audio_path.stem
-
-    # 1. Attempt Hugging Face ZeroGPU Space if configured
-    if settings.HF_SPACE_ID:
-        try:
-            logger.info("[ENGINE: HF_WHISPER_PYANNOTE] Initiating ZeroGPU Space transcription for meeting %s...", m_id)
-            segments = _transcribe_hf_space(audio_path, meeting_id=m_id)
-            if segments:
-                logger.info(
-                    "[ENGINE: HF_WHISPER_PYANNOTE] Successfully transcribed meeting %s (%d segments).",
-                    m_id,
-                    len(segments),
-                )
-                return segments
-            logger.warning("[HF_SPACE] Returned 0 segments; triggering fallback to Gemini.")
-        except Exception as hf_exc:
-            logger.warning(
-                "[FALLBACK: HF->GEMINI] Hugging Face ZeroGPU Space failed for meeting %s: %s. Falling back to Gemini...",
-                m_id,
-                hf_exc,
-            )
-
-    # 2. Attempt Google Gemini transcription if API key is present
-    if settings.GEMINI_API_KEY:
-        try:
-            logger.info("[ENGINE: GEMINI_FLASH] Initiating Gemini transcription for meeting %s...", m_id)
-            segments = _transcribe_gemini(audio_path, meeting_id=m_id)
-            if segments:
-                logger.info(
-                    "[ENGINE: GEMINI_FLASH] Successfully transcribed meeting %s (%d segments).",
-                    m_id,
-                    len(segments),
-                )
-                return segments
-        except Exception as gemini_exc:
-            logger.warning(
-                "[FALLBACK: GEMINI->LOCAL] Gemini transcription failed for meeting %s: %s. Falling back to local...",
-                m_id,
-                gemini_exc,
-            )
-
-    # 3. Local zero-cost fallback
-    logger.info("[ENGINE: LOCAL_FALLBACK] Transcribing meeting %s with local speech parser...", m_id)
-    local_segs = _transcribe_local_audio(audio_path)
-    if local_segs:
-        return local_segs
-
-    raise RuntimeError(f"All transcription engines failed for audio file: {audio_path}")
+    """Backward-compatible segment-only entrypoint."""
+    return transcribe_audio_with_metadata(audio_path, meeting_id).segments

@@ -1,38 +1,97 @@
+"""Local-only storage provider. Every stored path stays inside the configured root."""
+
 import uuid
+from abc import ABC, abstractmethod
 from pathlib import Path
 
 from fastapi import UploadFile
 
-from app.core.config import settings
+from app.core.app_config import APP_CONFIG
 
 
-def _audio_dir() -> Path:
-    path = Path(settings.STORAGE_DIR) / "audio"
-    path.mkdir(parents=True, exist_ok=True)
-    return path
+class StorageProvider(ABC):
+    @abstractmethod
+    def save(self, file: UploadFile, meeting_id: uuid.UUID) -> str:
+        raise NotImplementedError
+
+    @abstractmethod
+    def get(self, url: str) -> Path:
+        raise NotImplementedError
+
+    @abstractmethod
+    def get_url(self, path: Path) -> str:
+        raise NotImplementedError
+
+    @abstractmethod
+    def delete(self, url: str) -> None:
+        raise NotImplementedError
+
+    @abstractmethod
+    def exists(self, url: str) -> bool:
+        raise NotImplementedError
+
+
+class LocalStorageProvider(StorageProvider):
+    @property
+    def root(self) -> Path:
+        return Path(APP_CONFIG.storage_dir).resolve()
+
+    def get(self, url: str) -> Path:
+        if not url.startswith("local://"):
+            raise ValueError("Unsupported storage URL")
+        raw = Path(url.removeprefix("local://"))
+        candidate = (raw if raw.is_absolute() else Path.cwd() / raw).resolve()
+        if not candidate.is_relative_to(self.root):
+            candidate = (self.root / raw).resolve()
+        if not candidate.is_relative_to(self.root):
+            raise ValueError("Storage path escapes configured root")
+        return candidate
+
+    def get_url(self, path: Path) -> str:
+        path = path.resolve()
+        if not path.is_relative_to(self.root):
+            raise ValueError("Storage path escapes configured root")
+        return f"local://{path.relative_to(self.root).as_posix()}"
+
+    def save(self, file: UploadFile, meeting_id: uuid.UUID) -> str:
+        suffix = Path(file.filename or "").suffix.lower()
+        if suffix not in APP_CONFIG.uploads.audio_extensions:
+            raise ValueError(f"Unsupported audio format: {suffix or 'none'}")
+        destination = self.root / "audio" / f"{meeting_id}{suffix}"
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        total = 0
+        try:
+            with destination.open("wb") as output:
+                while block := file.file.read(1024 * 1024):
+                    total += len(block)
+                    if total > APP_CONFIG.uploads.max_audio_bytes:
+                        raise ValueError("Audio upload exceeds configured size limit")
+                    output.write(block)
+            if total == 0:
+                raise ValueError("Audio upload is empty")
+        except Exception:
+            destination.unlink(missing_ok=True)
+            raise
+        return self.get_url(destination)
+
+    def delete(self, url: str) -> None:
+        self.get(url).unlink(missing_ok=True)
+
+    def exists(self, url: str) -> bool:
+        return self.get(url).exists()
+
+
+def get_storage_provider() -> StorageProvider:
+    if APP_CONFIG.storage_provider == "local":
+        return LocalStorageProvider()
+    raise ValueError(f"Unsupported storage provider: {APP_CONFIG.storage_provider}")
 
 
 def save_upload(file: UploadFile, meeting_id: uuid.UUID) -> str:
-    """Saves an uploaded audio/video file to local disk and returns a storage URL.
-
-    Swap this function's body for an S3 `put_object` call later; callers only
-    ever see the returned URL string, so no other code needs to change.
-    """
-    suffix = Path(file.filename or "").suffix or ".bin"
-    dest = _audio_dir() / f"{meeting_id}{suffix}"
-
-    with dest.open("wb") as out:
-        while chunk := file.file.read(1024 * 1024):
-            out.write(chunk)
-
-    return f"local://{dest}"
+    return get_storage_provider().save(file, meeting_id)
 
 
 def resolve_local_path(storage_url: str | None) -> Path:
-    """Turns a `local://...` URL back into a filesystem Path for processing."""
     if not storage_url:
-        raise ValueError("storage_url cannot be None or empty")
-    if not storage_url.startswith("local://"):
-        raise ValueError(f"Unsupported storage backend for URL: {storage_url}")
-    return Path(storage_url.removeprefix("local://"))
-
+        raise ValueError("Missing storage URL")
+    return get_storage_provider().get(storage_url)

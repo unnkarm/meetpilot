@@ -1,12 +1,17 @@
+"""Bounded FFmpeg audio chunks with source-relative offsets."""
+
 import logging
-import os
+import subprocess
+import tempfile
 from pathlib import Path
 from typing import Any, TypedDict
 
+from app.core.app_config import APP_CONFIG
+
 logger = logging.getLogger(__name__)
 
-CHUNK_LENGTH_MS = 15 * 60 * 1000  # 15 min chunks (tune to quota)
-OVERLAP_MS = 15 * 1000  # 15s overlap for boundary context
+CHUNK_LENGTH_MS = APP_CONFIG.transcription.chunk_seconds * 1000
+OVERLAP_MS = APP_CONFIG.transcription.overlap_seconds * 1000
 
 
 class ChunkInfo(TypedDict):
@@ -22,112 +27,88 @@ def split_audio(
     chunk_length_ms: int = CHUNK_LENGTH_MS,
     overlap_ms: int = OVERLAP_MS,
 ) -> list[ChunkInfo]:
-    """Splits long audio (>15m) into sequential overlapping chunks.
-
-    Returns a list of ChunkInfo dicts with local start_offset_ms to re-align
-    timestamps back to the full meeting timeline.
-    """
-    if not file_path.exists():
+    """Split without loading the entire recording into Python memory."""
+    if not file_path.is_file():
         raise FileNotFoundError(f"Audio file not found at: {file_path}")
+    if chunk_length_ms <= 0 or not 0 <= overlap_ms < chunk_length_ms:
+        raise ValueError("Invalid audio chunk length or overlap")
 
     try:
-        from pydub import AudioSegment
-
-        audio = AudioSegment.from_file(str(file_path))
-        total_len = len(audio)
-
-        # If audio is within single chunk limit, return as single chunk without slicing
-        if total_len <= chunk_length_ms:
-            return [
-                {
-                    "path": file_path,
-                    "start_offset_ms": 0,
-                    "duration_ms": total_len,
-                    "is_temp": False,
-                }
-            ]
-
-        logger.info(
-            "Audio duration is %.1f mins (>15m limit). Splitting into overlapping chunks for meeting %s...",
-            total_len / 60000.0,
-            meeting_id,
+        probe = subprocess.run(
+            ["ffprobe", "-v", "error", "-show_entries", "format=duration",
+             "-of", "default=noprint_wrappers=1:nokey=1", str(file_path)],
+            capture_output=True, text=True, check=True,
         )
+        total_ms = int(float(probe.stdout.strip()) * 1000)
+    except (OSError, subprocess.CalledProcessError, ValueError) as exc:
+        raise RuntimeError(f"Could not inspect audio duration for meeting {meeting_id}") from exc
+    if total_ms <= 0:
+        raise ValueError("Audio recording has no duration")
+    if total_ms <= chunk_length_ms:
+        return [ChunkInfo(path=file_path, start_offset_ms=0, duration_ms=total_ms, is_temp=False)]
 
-        tmp_dir = Path("/tmp") if os.path.exists("/tmp") else file_path.parent
-        chunks: list[ChunkInfo] = []
-        start = 0
-        chunk_idx = 0
-
-        while start < total_len:
-            end = min(start + chunk_length_ms, total_len)
-            chunk_audio = audio[start:end]
-            chunk_file = tmp_dir / f"{meeting_id}_chunk_{chunk_idx}.wav"
-
-            # Export sliced WAV chunk
-            chunk_audio.export(str(chunk_file), format="wav")
-            chunks.append(
-                {
-                    "path": chunk_file,
-                    "start_offset_ms": start,
-                    "duration_ms": end - start,
-                    "is_temp": True,
-                }
+    logger.info("Splitting %.1f-minute recording into %d-second chunks meeting=%s",
+                total_ms / 60000.0, chunk_length_ms // 1000, meeting_id)
+    chunk_dir = Path(tempfile.mkdtemp(prefix="meetpilot_chunks_"))
+    chunks: list[ChunkInfo] = []
+    try:
+        start_ms = 0
+        while start_ms < total_ms:
+            end_ms = min(start_ms + chunk_length_ms, total_ms)
+            path = chunk_dir / f"chunk_{len(chunks):04d}.wav"
+            subprocess.run(
+                ["ffmpeg", "-nostdin", "-hide_banner", "-loglevel", "error",
+                 "-ss", f"{start_ms / 1000:.3f}", "-i", str(file_path),
+                 "-t", f"{(end_ms - start_ms) / 1000:.3f}", "-vn",
+                 "-ac", "1", "-ar", "16000", "-c:a", "pcm_s16le", str(path)],
+                capture_output=True, text=True, check=True,
             )
-
-            if end == total_len:
+            if not path.is_file() or path.stat().st_size == 0:
+                raise RuntimeError(f"FFmpeg produced an empty chunk for meeting {meeting_id}")
+            chunks.append(ChunkInfo(path=path, start_offset_ms=start_ms,
+                                    duration_ms=end_ms - start_ms, is_temp=True))
+            if end_ms == total_ms:
                 break
-
-            # Step forward by chunk length minus overlap
-            start = end - overlap_ms
-            chunk_idx += 1
-
+            start_ms = end_ms - overlap_ms
         return chunks
-
-    except Exception as exc:
-        logger.warning(
-            "pydub audio chunking unavailable or audio format unsupported (%s). Falling back to direct audio processing.",
-            exc,
-        )
-        return [
-            {
-                "path": file_path,
-                "start_offset_ms": 0,
-                "duration_ms": 0,
-                "is_temp": False,
-            }
-        ]
+    except (OSError, subprocess.CalledProcessError, RuntimeError) as exc:
+        cleanup_temp_chunks(chunks)
+        for path in chunk_dir.glob("chunk_*.wav"):
+            path.unlink(missing_ok=True)
+        if chunk_dir.exists():
+            chunk_dir.rmdir()
+        raise RuntimeError(f"Could not split audio for meeting {meeting_id}") from exc
 
 
 def dedupe_overlap_segments(segments: list[dict[str, Any]], overlap_seconds: float = 15.0) -> list[dict[str, Any]]:
-    """Deduplicates the overlap seam region across consecutive chunks.
-
-    Drops segments from chunk N+1 that start before chunk N's segments ended,
-    preserving chunk N's segments which have more preceding acoustic context.
-    """
+    """Drop repeated transcript turns from overlapping chunks."""
     if not segments:
         return []
-
-    # Ensure chronological order
     sorted_segments = sorted(segments, key=lambda s: s.get("start_time", 0.0))
     deduped: list[dict[str, Any]] = []
-
     for seg in sorted_segments:
         if deduped:
             prev_end = deduped[-1].get("end_time", 0.0)
-            # If this segment begins significantly before the previous segment ended within the overlap window, skip it
             if seg.get("start_time", 0.0) < (prev_end - (overlap_seconds / 2.0)):
                 continue
-
         deduped.append(seg)
-
     return deduped
 
 
 def cleanup_temp_chunks(chunks: list[ChunkInfo]) -> None:
-    """Removes temporary sliced chunk files from disk after transcription."""
-    for ch in chunks:
-        if ch.get("is_temp", False) and ch["path"].exists():
+    """Remove only files and directories generated by split_audio."""
+    directories: set[Path] = set()
+    for chunk in chunks:
+        if chunk["is_temp"]:
+            path = chunk["path"]
+            directories.add(path.parent)
             try:
-                ch["path"].unlink()
-            except Exception as exc:
-                logger.warning("Failed removing temporary chunk file %s: %s", ch["path"], exc)
+                path.unlink(missing_ok=True)
+            except OSError:
+                logger.warning("Could not remove temporary chunk %s", path)
+    for directory in directories:
+        if directory.name.startswith("meetpilot_chunks_"):
+            try:
+                directory.rmdir()
+            except OSError:
+                logger.warning("Could not remove temporary chunk directory %s", directory)

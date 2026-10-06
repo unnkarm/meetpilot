@@ -1,5 +1,6 @@
 import os
 from functools import lru_cache
+from app.core.app_config import APP_CONFIG
 
 try:
     from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -37,8 +38,16 @@ class Settings(BaseSettings):
     CELERY_BROKER_URL: str = "redis://localhost:6379/0"
     CELERY_RESULT_BACKEND: str = "redis://localhost:6379/1"
 
+    # Self-hosted upstream Vexa; service credentials stay on the backend.
+    VEXA_API_URL: str = "http://vexa:8056"
+    VEXA_ADMIN_URL: str = "http://vexa:8001"
+    VEXA_ADMIN_TOKEN: str = ""
+    VEXA_STT_TOKEN: str = ""
+    VEXA_TTS_TOKEN: str = ""
+    VEXA_REDIS_URL: str = ""
+
     # Auth (Legacy JWT & Clerk)
-    JWT_SECRET_KEY: str = "dev-secret-change-me"
+    JWT_SECRET_KEY: str = ""
     JWT_ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
     REFRESH_TOKEN_EXPIRE_DAYS: int = 14
@@ -52,42 +61,37 @@ class Settings(BaseSettings):
 
     # Gemini & AI Configuration (Configurable Quotas & Models)
     GEMINI_API_KEY: str = ""
-    GEMINI_TEXT_MODEL: str = "gemini-2.0-flash"
-    GEMINI_AUDIO_MODEL: str = "gemini-2.0-flash"
-    GEMINI_EMBEDDING_MODEL: str = "text-embedding-004"
-    GEMINI_RPM_LIMIT: int = 15
+    GEMINI_TEXT_MODEL: str = APP_CONFIG.ai.remote_model
+    GEMINI_AUDIO_MODEL: str = APP_CONFIG.ai.remote_model
+    GEMINI_EMBEDDING_MODEL: str = APP_CONFIG.embeddings.model
+    GEMINI_RPM_LIMIT: int = APP_CONFIG.ai.remote_rpm_limit
     GEMINI_TPM_LIMIT: int = 1000000
     GEMINI_RPD_LIMIT: int = 1500
 
     # Local Zero-Cost Inference Engines
-    USE_LOCAL_WHISPER: bool = True
-    USE_LOCAL_EMBEDDINGS: bool = True
+    USE_LOCAL_WHISPER: bool = APP_CONFIG.transcription.provider == "local"
+    USE_LOCAL_EMBEDDINGS: bool = APP_CONFIG.embeddings.provider == "ollama"
 
     # Hugging Face ZeroGPU Space (Self-Hosted Whisper + PyAnnote Diarization)
-    HF_SPACE_ID: str = "Subham05x/meetpilot-whisper-diarization"
+    HF_SPACE_ID: str = APP_CONFIG.transcription.hf_space_id
     HF_API_TOKEN: str = ""
     HF_SPACE_TIMEOUT_SECONDS: int = 600
 
 
     # Storage
-    STORAGE_DIR: str = "./storage"
+    STORAGE_DIR: str = APP_CONFIG.storage_dir
 
     # CORS
     CORS_ORIGINS: str = "http://localhost:3000,http://localhost:5173"
 
     # Third-Party Integrations & Encryption at rest
-    ENCRYPTION_SECRET_KEY: str = "meetpilot-super-fernet-secret-32-chars-long!"
+    ENCRYPTION_SECRET_KEY: str = ""
     GOOGLE_CLIENT_ID: str = ""
     GOOGLE_CLIENT_SECRET: str = ""
     GOOGLE_REDIRECT_URI: str = "http://localhost:3000/oauth/google/callback"
     ZOOM_CLIENT_ID: str = ""
     ZOOM_CLIENT_SECRET: str = ""
     ZOOM_REDIRECT_URI: str = "http://localhost:3000/oauth/zoom/callback"
-
-    # Vexa.ai Self-Hosted Live Meeting Capture
-    VEXA_API_URL: str = "http://host.docker.internal:18056"
-    VEXA_WS_URL: str = "ws://host.docker.internal:18056/ws"
-    VEXA_API_KEY: str = "vxa_bot_NPdcTll20UtK1d1FJBq6xJlQ3j5qfzvu"
 
     @property
     def cors_origins_list(self) -> list[str]:

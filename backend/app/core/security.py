@@ -1,97 +1,64 @@
-import base64
-import json
+"""Fail-closed verification of Clerk session JWTs."""
+
 import logging
 from typing import Any
+from urllib.parse import urlparse
+
+import jwt
+from jwt import PyJWKClient
 
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
-
-# Dynamically import JWT libraries with fallback to pure-Python parsing
-try:
-    import jwt as pyjwt
-    from jwt import PyJWKClient
-except ImportError:
-    pyjwt = None
-    PyJWKClient = None
-
-try:
-    from jose import jwt as jose_jwt
-except ImportError:
-    jose_jwt = None
-
-_jwk_client: Any | None = None
+_jwk_client: PyJWKClient | None = None
 
 
-def get_jwk_client() -> Any | None:
-    global _jwk_client
-    if _jwk_client is not None:
-        return _jwk_client
-
-    if not PyJWKClient:
-        return None
-
-    jwks_url = settings.CLERK_JWKS_URL
-    if not jwks_url and settings.CLERK_ISSUER_URL:
-        jwks_url = f"{settings.CLERK_ISSUER_URL.rstrip('/')}/.well-known/jwks.json"
-
-    if jwks_url:
-        try:
-            _jwk_client = PyJWKClient(jwks_url)
-            return _jwk_client
-        except Exception as e:
-            logger.warning(f"Failed to initialize PyJWKClient: {e}")
+def get_clerk_issuer() -> str | None:
+    """Use the explicit issuer or derive it from Clerk's Frontend API JWKS URL."""
+    if settings.CLERK_ISSUER_URL:
+        return settings.CLERK_ISSUER_URL.rstrip("/")
+    parsed = urlparse(settings.CLERK_JWKS_URL)
+    if (parsed.scheme == "https" and parsed.netloc and
+            parsed.path == "/.well-known/jwks.json" and
+            not parsed.query and not parsed.fragment):
+        return f"https://{parsed.netloc}"
     return None
 
 
-def _decode_unverified_jwt(token: str) -> dict[str, Any] | None:
-    """Decodes JWT payload without signature verification (universal pure-Python fallback)."""
-    try:
-        parts = token.split(".")
-        if len(parts) < 2:
-            return None
-        payload_b64 = parts[1]
-        rem = len(payload_b64) % 4
-        if rem > 0:
-            payload_b64 += "=" * (4 - rem)
-        decoded = base64.urlsafe_b64decode(payload_b64.encode("utf-8"))
-        return json.loads(decoded.decode("utf-8"))
-    except Exception as e:
-        logger.warning(f"Unverified JWT payload decode failed: {e}")
+def get_jwk_client() -> PyJWKClient | None:
+    global _jwk_client
+    if _jwk_client is not None:
+        return _jwk_client
+    jwks_url = settings.CLERK_JWKS_URL or (
+        f"{settings.CLERK_ISSUER_URL.rstrip('/')}/.well-known/jwks.json"
+        if settings.CLERK_ISSUER_URL else ""
+    )
+    if not jwks_url or not jwks_url.startswith("https://"):
         return None
+    _jwk_client = PyJWKClient(jwks_url)
+    return _jwk_client
 
 
 def verify_clerk_token(token: str) -> dict[str, Any] | None:
-    """Verifies a Clerk JWT token using JWKS RS256 signature validation or fallback payload decoding."""
-    # 1. Attempt PyJWKClient verification if available
-    client = get_jwk_client()
-    if client and pyjwt:
-        try:
-            signing_key = client.get_signing_key_from_jwt(token)
-            payload = pyjwt.decode(
-                token,
-                signing_key.key,
-                algorithms=["RS256"],
-                options={"verify_aud": False},
-            )
-            return payload
-        except Exception as e:
-            logger.warning(f"Clerk JWKS signature verification failed: {e}")
-
-    # 2. Attempt pyjwt / jose unverified decode
-    if pyjwt:
-        try:
-            header = pyjwt.get_unverified_header(token)
-            if header.get("alg") in ("RS256", "HS256"):
-                return pyjwt.decode(token, options={"verify_signature": False})
-        except Exception:
-            pass
-
-    if jose_jwt:
-        try:
-            return jose_jwt.get_unverified_claims(token)
-        except Exception:
-            pass
-
-    # 3. Universal pure-Python fallback decode
-    return _decode_unverified_jwt(token)
+    """Return claims only after RS256 signature, expiry and issuer checks."""
+    try:
+        client = get_jwk_client()
+    except (ValueError, OSError) as exc:
+        logger.warning("Clerk verifier initialization failed: %s", type(exc).__name__)
+        return None
+    issuer = get_clerk_issuer()
+    if client is None or issuer is None:
+        logger.error("Clerk JWKS URL or issuer cannot be determined")
+        return None
+    try:
+        key = client.get_signing_key_from_jwt(token)
+        return jwt.decode(
+            token,
+            key.key,
+            algorithms=["RS256"],
+            issuer=issuer,
+            options={"verify_aud": False, "require": ["exp", "iss", "sub"]},
+        )
+    except (jwt.PyJWTError, ValueError, OSError) as exc:
+        logger.warning("Clerk token verification failed: %s", type(exc).__name__)
+        return None
