@@ -15,7 +15,8 @@ from app.models.meeting import Meeting
 from app.models.task import Task
 from app.models.transcript import TranscriptSegment
 from app.models.user import User
-from app.services.gemini_client import embed_text
+from app.services.embedding_provider import embed_text
+from app.core.app_config import APP_CONFIG
 from app.services.transcript_utils import format_timestamp
 
 logger = logging.getLogger(__name__)
@@ -92,6 +93,7 @@ def search(
                     .filter(
                         Meeting.workspace_id.in_(workspace_ids),
                         TranscriptSegment.embedding.is_not(None),
+                        TranscriptSegment.embedding_model == APP_CONFIG.embeddings.model,
                     )
                     .order_by(TranscriptSegment.embedding.cosine_distance(query_embedding).asc())
                     .limit(MAX_VECTOR_RESULTS)
@@ -173,6 +175,7 @@ def search(
                     .filter(
                         DocumentChunk.workspace_id.in_(workspace_ids),
                         DocumentChunk.embedding.is_not(None),
+                        DocumentChunk.embedding_model == APP_CONFIG.embeddings.model,
                     )
                     .order_by(DocumentChunk.embedding.cosine_distance(query_embedding).asc())
                     .limit(MAX_VECTOR_RESULTS)

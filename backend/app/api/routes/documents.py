@@ -4,11 +4,12 @@ import uuid
 from typing import List, Optional
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
 from sqlalchemy.orm import Session
+from app.core.app_config import APP_CONFIG
 
 from app.api.deps import get_current_user, get_db
 from app.models.document import KnowledgeDocument
 from app.models.user import User
-from app.models.workspace import WorkspaceMember
+from app.models.workspace import Workspace, WorkspaceMember
 from app.schemas.document import (
     DocumentOut,
     DocumentUploadResponse,
@@ -22,6 +23,7 @@ from app.services.document_service import (
     process_and_index_document,
 )
 from app.services.knowledge_chat_service import answer_workspace_knowledge
+from app.services.product_events import track_event
 
 logger = logging.getLogger(__name__)
 
@@ -44,7 +46,7 @@ def _verify_workspace_membership(workspace_id: uuid.UUID, user: User, db: Sessio
 
 
 @router.post("/documents/upload", response_model=DocumentUploadResponse)
-async def upload_document(
+def upload_document(
     workspace_id: uuid.UUID = Form(...),
     file: UploadFile = File(...),
     current_user: User = Depends(get_current_user),
@@ -52,6 +54,9 @@ async def upload_document(
 ):
     """Uploads a company knowledge document (PDF, DOCX, TXT, MD), extracts text, generates embeddings, and indexes into pgvector."""
     _verify_workspace_membership(workspace_id, current_user, db)
+    workspace = db.get(Workspace, workspace_id)
+    if workspace and workspace.is_demo:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Upload real documents to a non-demo workspace")
 
     filename = file.filename or "document.txt"
     _, ext = os.path.splitext(filename)
@@ -61,12 +66,12 @@ async def upload_document(
             detail=f"Unsupported file format '{ext}'. Supported formats are: PDF (.pdf), Word (.docx), Plain Text (.txt), and Markdown (.md).",
         )
 
-    file_bytes = await file.read()
+    file_bytes = file.file.read(APP_CONFIG.uploads.max_document_bytes + 1)
     file_size = len(file_bytes)
-    if file_size > 30 * 1024 * 1024:  # 30MB limit
+    if file_size > APP_CONFIG.uploads.max_document_bytes:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="File size exceeds the 30MB limit for knowledge documents.",
+            detail="File size exceeds the configured limit for knowledge documents.",
         )
 
     file_type = get_file_type_from_filename(filename)
@@ -89,10 +94,14 @@ async def upload_document(
 
     # Process, chunk, embed, and store in pgvector
     processed_doc = process_and_index_document(db, doc, file_bytes)
+    if processed_doc.status == "ready":
+        track_event(db, "first_document_uploaded", current_user.id, workspace_id, once=True)
+        db.commit()
 
     return DocumentUploadResponse(
         document=DocumentOut.model_validate(processed_doc),
-        message=f"Document '{filename}' indexed successfully into workspace knowledge base ({processed_doc.chunk_count} chunks).",
+        message=(f"Document '{filename}' indexed into workspace knowledge ({processed_doc.chunk_count} chunks)."
+                 if processed_doc.status == "ready" else f"Document processing failed: {processed_doc.failure_reason}"),
     )
 
 
@@ -142,6 +151,11 @@ def chat_with_workspace_knowledge(
     _verify_workspace_membership(payload.workspace_id, current_user, db)
 
     answer, citations_data = answer_workspace_knowledge(db, payload.workspace_id, payload.question)
+    if not db.get(Workspace, payload.workspace_id).is_demo:
+        track_event(db, "first_ai_question", current_user.id, payload.workspace_id, once=True)
+        if len({citation["type"] for citation in citations_data}) > 1:
+            track_event(db, "first_cross_source_question", current_user.id, payload.workspace_id, once=True)
+        db.commit()
 
     citations = [KnowledgeCitation(**c) for c in citations_data]
     return KnowledgeChatResponse(answer=answer, citations=citations)

@@ -22,6 +22,9 @@ from app.schemas.workspace import (
     WorkspaceOut,
     WorkspaceUpdate,
 )
+from app.services.storage import get_storage_provider
+from app.services.demo_workspace import create_demo_workspace
+from app.services.product_events import track_event
 
 router = APIRouter(prefix="/api/v1/workspaces", tags=["workspaces"])
 
@@ -38,9 +41,19 @@ def create_workspace(
 
     membership = WorkspaceMember(workspace_id=workspace.id, user_id=current_user.id, role=WorkspaceRole.owner)
     db.add(membership)
+    track_event(db, "workspace_created", current_user.id, workspace.id)
     db.commit()
     db.refresh(workspace)
     return workspace
+
+
+@router.post("/demo", response_model=WorkspaceOut, status_code=status.HTTP_201_CREATED)
+def explore_demo(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> Workspace:
+    """Create or return this user's isolated sample workspace."""
+    return create_demo_workspace(db, current_user)
 
 
 @router.get("", response_model=list[WorkspaceOut])
@@ -98,6 +111,7 @@ def invite_member(
 
     member = WorkspaceMember(workspace_id=workspace_id, user_id=invitee.id, role=payload.role)
     db.add(member)
+    track_event(db, "team_member_invited", _membership.user_id, workspace_id)
     db.commit()
 
     return WorkspaceMemberOut(
@@ -181,7 +195,9 @@ def get_workspace_analytics(
     meetings = db.query(Meeting).filter(Meeting.workspace_id == workspace_id).all()
     total_meetings = len(meetings)
     completed_meetings = sum(1 for m in meetings if m.status == MeetingStatus.completed)
-    processing_meetings = sum(1 for m in meetings if m.status == MeetingStatus.processing)
+    processing_meetings = sum(1 for m in meetings if m.status in (
+        MeetingStatus.processing, MeetingStatus.transcribing, MeetingStatus.transcribed,
+        MeetingStatus.embedding, MeetingStatus.analyzing))
     queued_meetings = sum(1 for m in meetings if m.status == MeetingStatus.queued)
     failed_meetings = sum(1 for m in meetings if m.status == MeetingStatus.failed)
 
@@ -277,16 +293,10 @@ def delete_workspace(
     if workspace is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Workspace not found")
 
-    # Clean up local audio files for meetings in this workspace
-    for meeting in workspace.meetings:
-        if meeting.audio_url and not meeting.audio_url.startswith("http"):
-            try:
-                import os
-                if os.path.exists(meeting.audio_url):
-                    os.remove(meeting.audio_url)
-            except Exception:
-                pass
-
+    audio_urls = [meeting.audio_url for meeting in workspace.meetings if meeting.audio_url and meeting.audio_url.startswith("local://")]
     db.delete(workspace)
     db.commit()
+    storage = get_storage_provider()
+    for audio_url in audio_urls:
+        storage.delete(audio_url)
     return None

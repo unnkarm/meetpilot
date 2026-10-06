@@ -2,6 +2,7 @@ import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
+from sqlalchemy import func
 
 from app.api.deps import get_current_user, get_meeting_for_member
 from app.database.session import get_db
@@ -11,8 +12,25 @@ from app.models.user import User
 from app.models.workspace import WorkspaceMember
 from app.schemas.meeting import TaskOut
 from app.schemas.task import TaskCreateRequest, TaskUpdateRequest
+from app.services.product_events import track_event
+from app.models.task import TaskStatus
 
 router = APIRouter(prefix="/api/v1/tasks", tags=["tasks"])
+
+
+def _resolve_assignee(db: Session, workspace_id: uuid.UUID, name: str | None) -> User | None:
+    if not name or not name.strip():
+        return None
+    member = (
+        db.query(User)
+        .join(WorkspaceMember, WorkspaceMember.user_id == User.id)
+        .filter(WorkspaceMember.workspace_id == workspace_id, func.lower(User.name) == name.strip().lower())
+        .first()
+    )
+    if member is None:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                            detail="Assignee must be a member of this workspace")
+    return member
 
 
 @router.get("", response_model=list[TaskOut])
@@ -70,10 +88,12 @@ def create_task(
             db.add(target_meeting)
             db.flush()
 
+    assignee = _resolve_assignee(db, target_meeting.workspace_id, payload.assignee_name)
     task = Task(
         meeting_id=target_meeting.id,
         title=payload.title,
-        assignee_name=payload.assignee_name or current_user.name,
+        assignee_id=assignee.id if assignee else None,
+        assignee_name=assignee.name if assignee else None,
         due_date=payload.due_date,
         priority=payload.priority,
         status=payload.status,
@@ -108,8 +128,20 @@ def update_task(
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not a member of this task's workspace")
 
     update_data = payload.model_dump(exclude_unset=True)
+    was_done = task.status == TaskStatus.done
+    if any(update_data.get(field) is None for field in ("title", "priority", "status") if field in update_data):
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Title, priority and status cannot be null")
+    if "title" in update_data and not update_data["title"].strip():
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Task title cannot be blank")
+    if "assignee_name" in update_data:
+        assignee = _resolve_assignee(db, task.meeting.workspace_id, update_data["assignee_name"])
+        task.assignee_id = assignee.id if assignee else None
+        update_data["assignee_name"] = assignee.name if assignee else None
     for field, value in update_data.items():
         setattr(task, field, value)
+
+    if not was_done and task.status == TaskStatus.done and not task.meeting.workspace.is_demo:
+        track_event(db, "first_task_completed", current_user.id, task.meeting.workspace_id, once=True)
 
     db.commit()
     db.refresh(task)

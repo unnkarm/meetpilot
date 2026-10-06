@@ -9,6 +9,7 @@ from app.models.chat import ChatMessage, ChatRole
 from app.models.user import User
 from app.schemas.chat import ChatMessageOut, ChatRequest, ChatResponse
 from app.services.chat_service import answer_question
+from app.services.product_events import track_event
 
 router = APIRouter(prefix="/api/v1/meetings", tags=["chat"])
 
@@ -20,9 +21,11 @@ def chat_with_meeting(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> ChatResponse:
-    get_meeting_for_member(meeting_id, current_user, db)
+    meeting = get_meeting_for_member(meeting_id, current_user, db)
 
     db.add(ChatMessage(meeting_id=meeting_id, user_id=current_user.id, role=ChatRole.user, content=payload.question))
+    if not meeting.workspace.is_demo:
+        track_event(db, "first_ai_question", current_user.id, meeting.workspace_id, once=True)
     db.commit()
 
     answer, cited_timestamp = answer_question(db, meeting_id, payload.question)

@@ -1,7 +1,7 @@
 import logging
 import uuid
 
-from fastapi import Depends, HTTPException, Request, status
+from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.orm import Session
 
@@ -17,7 +17,6 @@ oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/me", auto_error=Fals
 
 
 def get_current_user(
-    request: Request,
     token: str | None = Depends(oauth2_scheme),
     db: Session = Depends(get_db),
 ) -> User:
@@ -55,19 +54,7 @@ def get_current_user(
         or clerk_payload.get("avatar_url")
     )
 
-    # 2. Check authenticated client headers sent by Frontend SDK
-    header_email = request.headers.get("x-user-email")
-    header_name = request.headers.get("x-user-name")
-    header_avatar = request.headers.get("x-user-avatar")
-
-    if header_email and "@" in header_email:
-        email = header_email
-    if header_name and header_name.strip():
-        name = header_name.strip()
-    if header_avatar and header_avatar.startswith("http"):
-        avatar_url = header_avatar
-
-    # 3. If email/name still empty and CLERK_SECRET_KEY is configured, fetch directly from Clerk API
+    # If verified claims omit profile fields, fetch them from Clerk's authenticated API.
     if (not email or not name or f"{clerk_id}" in str(email)) and settings.CLERK_SECRET_KEY:
         try:
             import httpx
@@ -103,8 +90,11 @@ def get_current_user(
     if not name or name == email.split("@")[0]:
         name = email.split("@")[0]
 
-    # Query DB by clerk_id or email
-    user = db.query(User).filter((User.clerk_id == clerk_id) | (User.email == email)).first()
+    # The verified subject is the account key. An email may link a legacy user only
+    # when it came from verified claims or Clerk's server API and is not already bound.
+    user = db.query(User).filter(User.clerk_id == clerk_id).first()
+    if user is None and email and not email.endswith("@clerk.user"):
+        user = db.query(User).filter(User.email == email, User.clerk_id.is_(None)).first()
     if user:
         updated = False
         if user.clerk_id != clerk_id:
@@ -143,18 +133,23 @@ def get_current_user(
             avatar_url=avatar_url,
         )
         db.add(new_user)
+        # The event references this user by ID. Insert the user first so the
+        # foreign key is valid even when SQLAlchemy flushes pending rows later.
+        db.flush()
+        from app.services.product_events import track_event
+        track_event(db, "user_created", new_user.id, once=True)
         db.commit()
         db.refresh(new_user)
         return new_user
     except Exception as e:
         db.rollback()
         # Retry query in case of parallel creation race
-        retry_user = db.query(User).filter((User.clerk_id == clerk_id) | (User.email == email)).first()
+        retry_user = db.query(User).filter(User.clerk_id == clerk_id).first()
         if retry_user:
             return retry_user
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to synchronize user account with database: {str(e)}",
+            detail="Failed to synchronize user account with database",
         )
 
 
