@@ -8,11 +8,13 @@ from typing import List, Tuple, Dict, Any, Optional
 from sqlalchemy.orm import Session
 
 from app.models.document import KnowledgeDocument, DocumentChunk
-from app.services.gemini_client import embed_texts
+from app.core.app_config import APP_CONFIG
+from app.services.embedding_provider import embed_texts
+from app.services.language_detection import detect_text_language
 
 logger = logging.getLogger(__name__)
 
-SUPPORTED_EXTENSIONS = {".pdf", ".docx", ".txt", ".md", ".markdown"}
+SUPPORTED_EXTENSIONS = set(APP_CONFIG.uploads.document_extensions)
 
 
 def get_file_type_from_filename(filename: str) -> str:
@@ -49,18 +51,16 @@ def extract_text_from_pdf(file_bytes: bytes) -> List[Tuple[Optional[int], str]]:
 
     # 2. Fallback stream extraction for basic text objects (BT ... ET)
     try:
-        content_str = file_bytes.decode("latin-1", errors="ignore")
+        content_str = file_bytes.decode("latin-1")
         # Extract text in parens inside PDF streams
         text_matches = re.findall(r"\((.*?)\)\s*Tj", content_str)
-        if text_matches:
+        if text_matches and all(value.isascii() for value in text_matches):
             combined = " ".join(text_matches).strip()
             if combined:
                 pages.append((1, combined))
     except Exception as exc:
         logger.warning(f"Fallback PDF stream extraction error: {exc}")
 
-    if not pages:
-        pages.append((1, "PDF content processed."))
     return pages
 
 
@@ -92,7 +92,7 @@ def extract_text_from_docx(file_bytes: bytes) -> List[Tuple[Optional[int], str]]
 
 def extract_text_from_text_file(file_bytes: bytes) -> List[Tuple[Optional[int], str]]:
     """Extracts text from TXT or Markdown bytes."""
-    for encoding in ["utf-8", "utf-8-sig", "latin-1", "cp1252"]:
+    for encoding in ["utf-8-sig", "utf-8", "cp1252"]:
         try:
             txt = file_bytes.decode(encoding).strip()
             if txt:
@@ -115,10 +115,14 @@ def extract_document_pages(file_bytes: bytes, filename: str) -> List[Tuple[Optio
 
 def chunk_document_pages(
     pages: List[Tuple[Optional[int], str]],
-    target_chunk_size: int = 500,
-    overlap: int = 100
+    target_chunk_size: int | None = None,
+    overlap: int | None = None,
 ) -> List[Dict[str, Any]]:
     """Chunks text preserving page numbers and adding sliding window overlap."""
+    target_chunk_size = target_chunk_size or APP_CONFIG.documents.chunk_chars
+    overlap = APP_CONFIG.documents.overlap_chars if overlap is None else overlap
+    if target_chunk_size <= 0 or not 0 <= overlap < target_chunk_size:
+        raise ValueError("Invalid document chunk size or overlap")
     chunks: List[Dict[str, Any]] = []
     chunk_index = 0
 
@@ -144,7 +148,7 @@ def chunk_document_pages(
             
             # Try to break cleanly at sentence or word boundary if not at end
             if end < len(text):
-                last_period = text.rfind(". ", start, end)
+                last_period = max(text.rfind(marker, start, end) for marker in (". ", "। ", "॥ ", "。 ", "? ", "! "))
                 if last_period != -1 and last_period > start + (target_chunk_size // 2):
                     end = last_period + 1
                 else:
@@ -183,25 +187,33 @@ def process_and_index_document(
         total_text = "".join(p[1] for p in pages).strip()
         
         if not total_text:
-            document.status = "ready"
+            document.status = "failed"
+            document.failure_reason = "No extractable text found in document"
             document.chunk_count = 0
             db.commit()
             return document
+
+        detected = detect_text_language(total_text)
+        document.language_code = detected.code
+        document.language_confidence = detected.confidence
 
         # 2. Chunk text
-        chunks_data = chunk_document_pages(pages, target_chunk_size=500, overlap=100)
+        chunks_data = chunk_document_pages(pages)
         
         if not chunks_data:
-            document.status = "ready"
+            document.status = "failed"
+            document.failure_reason = "No indexable document chunks found"
             document.chunk_count = 0
             db.commit()
             return document
 
-        # 3. Generate 768-dim embeddings in batch
+        # 3. Generate local embeddings in batch
         texts_to_embed = [c["text"] for c in chunks_data]
         embeddings = embed_texts(texts_to_embed, task_type="RETRIEVAL_DOCUMENT")
 
-        # 4. Save chunks
+        # 4. Replace prior chunks only after extraction and embedding succeeded.
+        db.query(DocumentChunk).filter(DocumentChunk.document_id == document.id).delete()
+        db.flush()
         chunk_objects = []
         for idx, c_data in enumerate(chunks_data):
             emb = embeddings[idx] if idx < len(embeddings) else None
@@ -212,7 +224,9 @@ def process_and_index_document(
                 chunk_index=c_data["chunk_index"],
                 page_number=c_data["page_number"],
                 text=c_data["text"],
+                language_code=detect_text_language(c_data["text"]).code,
                 embedding=emb,
+                embedding_model=APP_CONFIG.embeddings.model,
             )
             chunk_objects.append(chunk_obj)
 
@@ -226,6 +240,7 @@ def process_and_index_document(
 
     except Exception as exc:
         logger.exception(f"Failed to process knowledge document {document.id}: {exc}")
+        db.rollback()
         document.status = "failed"
         document.failure_reason = str(exc)
         db.commit()
