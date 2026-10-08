@@ -1,6 +1,10 @@
-import asyncio
 import logging
 import uuid
+import json
+from pathlib import Path
+
+import redis
+from fastapi.responses import FileResponse
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
@@ -12,17 +16,37 @@ from app.models.meeting import Meeting, MeetingParticipant, MeetingStatus
 from app.models.user import User
 from app.models.workspace import WorkspaceMember
 from app.schemas.meeting import LiveMeetingStartRequest, MeetingDetail
-from app.services.vexa_client import (
-    extract_google_meet_code,
-    listen_live_transcript_stream,
-    start_google_meet_bot,
-    stop_google_meet_bot,
-)
+from app.services.native_meeting import parse_meeting_target
+from app.workers.vexa_meeting import run_vexa_meeting_bot_task
+from app.services.vexa_client import VexaClient, VexaError
+import asyncio
 from app.workers.meeting_processor import process_live_meeting
+from app.core.config import settings
+from app.services.meeting_language import display_script
+from app.services.access_control import require_meeting_control
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/v1/meetings/live", tags=["live-meetings"])
+
+
+@router.get("/{meeting_id}/bot-status")
+def bot_status(meeting_id: uuid.UUID, current_user: User = Depends(get_current_user),
+               db: Session = Depends(get_db)) -> dict:
+    meeting = get_meeting_for_member(meeting_id, current_user, db)
+    client = redis.Redis.from_url(settings.REDIS_URL)
+    raw = client.get(f"native-meeting:{meeting_id}:status")
+    return json.loads(raw) if raw else {"state": meeting.status.value, "text": meeting.failure_reason or "Bot is queued"}
+
+
+@router.get("/{meeting_id}/bot-diagnostics")
+def bot_diagnostics(meeting_id: uuid.UUID, current_user: User = Depends(get_current_user),
+                    db: Session = Depends(get_db)):
+    meeting = get_meeting_for_member(meeting_id, current_user, db)
+    screenshot = Path(settings.STORAGE_DIR) / "bot_diagnostics" / str(meeting.workspace_id) / f"{meeting.id}.png"
+    if not screenshot.is_file():
+        raise HTTPException(status_code=404, detail="No bot screenshot has been captured for this meeting")
+    return FileResponse(screenshot, media_type="image/png", headers={"Cache-Control": "no-store"})
 
 
 @router.post("/start", response_model=MeetingDetail, status_code=status.HTTP_201_CREATED)
@@ -31,7 +55,7 @@ async def start_live_meeting(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> MeetingDetail:
-    """Dispatches a Vexa bot to join a Google Meet room and streams transcripts in real-time."""
+    """Queue the upstream Vexa engine using this workspace's credentials."""
     # 1. Tenant Isolation: Confirm user is a member of the workspace
     membership = db.get(WorkspaceMember, (payload.workspace_id, current_user.id))
     if membership is None:
@@ -40,17 +64,32 @@ async def start_live_meeting(
             detail="You are not a member of this workspace",
         )
 
-    # 2. Extract and validate Google Meet code
-    clean_code = extract_google_meet_code(payload.meeting_url)
-    title = (payload.title or "").strip() or f"Google Meet ({clean_code})"
+    try:
+        script = display_script(payload.transcription_language, payload.display_script)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    # 2. Restrict browser navigation to known meeting hosts.
+    try:
+        target = parse_meeting_target(payload.meeting_url)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    try:
+        await asyncio.to_thread(VexaClient(payload.workspace_id).preflight)
+    except Exception as exc:
+        logger.warning("Vexa preflight failed: %s", type(exc).__name__)
+        raise HTTPException(status_code=503, detail="Local Vexa engine is unavailable. Start Docker Compose and check Vexa health.") from exc
+    title = (payload.title or "").strip() or f"{target.platform.replace('_', ' ').title()} ({target.native_id})"
 
     # 3. Create meeting row in database with source='live' and status='in_progress'
     meeting = Meeting(
         workspace_id=payload.workspace_id,
         title=title,
         source="live",
-        native_meeting_id=clean_code,
+        native_meeting_id=target.native_id,
         status=MeetingStatus.in_progress,
+        transcription_language=payload.transcription_language,
+        display_script=script,
         created_by=current_user.id,
     )
     db.add(meeting)
@@ -69,33 +108,23 @@ async def start_live_meeting(
     db.commit()
     db.refresh(meeting)
 
-    # 4. Dispatch Vexa Bot via REST
+    # 4. Dispatch Vexa's bridge on its own queue; a meeting cannot block uploads.
     try:
-        start_res = start_google_meet_bot(clean_code, bot_name="MeetPilot AI Bot", transcribe_enabled=True)
-        if isinstance(start_res, dict) and "id" in start_res:
-            meeting.vexa_bot_id = str(start_res["id"])
-            db.commit()
-            db.refresh(meeting)
-    except HTTPException:
-        raise
-    except Exception as exc:
-        logger.exception("Failed dispatching Vexa bot for Google Meet %s", clean_code)
-        meeting.status = MeetingStatus.failed
-        meeting.failure_reason = f"Failed dispatching meeting bot: {exc}"
-        db.commit()
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail=f"Failed dispatching live meeting bot: {exc}",
+        run_vexa_meeting_bot_task.apply_async(
+            args=[str(meeting.id), target.url, "MeetPilot AI Bot"], queue="meeting_bot",
         )
-
-    # 5. Launch asynchronous background WebSocket consumer for live transcript ingestion
-    try:
-        asyncio.create_task(listen_live_transcript_stream(meeting.id, clean_code))
-    except Exception as stream_exc:
-        logger.warning("Could not launch background WebSocket stream listener: %s", stream_exc)
+    except Exception as exc:
+        logger.exception("Could not queue Vexa meeting bot meeting=%s", meeting.id)
+        db.delete(meeting)
+        db.commit()
+        raise HTTPException(status_code=503, detail="Vexa bridge worker is unavailable") from exc
 
     base = _to_list_item(meeting)
-    return MeetingDetail(**base.model_dump(), audio_url=meeting.audio_url, failure_reason=meeting.failure_reason)
+    return MeetingDetail(**base.model_dump(), audio_url=meeting.audio_url, failure_reason=meeting.failure_reason,
+                         capture_failure_reason=meeting.capture_failure_reason,
+                         transcription_language=meeting.transcription_language, display_script=meeting.display_script,
+                         language_code=meeting.language_code, language_name=meeting.language_name,
+                         language_confidence=meeting.language_confidence, is_multilingual=meeting.is_multilingual)
 
 
 @router.post("/{meeting_id}/stop", response_model=MeetingDetail)
@@ -104,23 +133,23 @@ def stop_live_meeting(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> MeetingDetail:
-    """Tells Vexa's bot to leave the call and enqueues the meeting into the downstream Celery pipeline."""
+    """Signal Vexa to leave, then process the persisted local transcript."""
     meeting = get_meeting_for_member(meeting_id, current_user, db)
+    require_meeting_control(db, meeting, current_user.id)
 
-    # 1. Stop Vexa bot
-    if meeting.native_meeting_id:
-        try:
-            stop_google_meet_bot(meeting.native_meeting_id)
-        except Exception as stop_exc:
-            logger.warning("Error stopping Vexa bot for %s: %s", meeting.native_meeting_id, stop_exc)
-
-    # 2. Mark meeting status as queued and enqueue downstream Celery extraction pipeline
+    # The bot observes this status, flushes its speech buffers, and exits.
     meeting.status = MeetingStatus.queued
     meeting.failure_reason = None
     db.commit()
     db.refresh(meeting)
 
-    process_live_meeting.delay(str(meeting.id))
+    # Fallback if the bot failed before its normal shutdown path. _claim keeps
+    # duplicate deliveries from processing the meeting twice.
+    process_live_meeting.apply_async(args=[str(meeting.id)], countdown=120)
 
     base = _to_list_item(meeting)
-    return MeetingDetail(**base.model_dump(), audio_url=meeting.audio_url, failure_reason=meeting.failure_reason)
+    return MeetingDetail(**base.model_dump(), audio_url=meeting.audio_url, failure_reason=meeting.failure_reason,
+                         capture_failure_reason=meeting.capture_failure_reason,
+                         transcription_language=meeting.transcription_language, display_script=meeting.display_script,
+                         language_code=meeting.language_code, language_name=meeting.language_name,
+                         language_confidence=meeting.language_confidence, is_multilingual=meeting.is_multilingual)
