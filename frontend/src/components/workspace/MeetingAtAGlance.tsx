@@ -37,7 +37,7 @@ export const MeetingAtAGlance: React.FC<MeetingAtAGlanceProps> = ({
             Duration
           </div>
           <div className="text-lg font-black text-white">{formatDurationDisplay(durationSeconds)}</div>
-          <div className="text-[10px] text-slate-400 font-medium">16kHz audio recording</div>
+          <div className="text-[10px] text-slate-400 font-medium">Meeting audio</div>
         </div>
       </div>
 
@@ -51,7 +51,7 @@ export const MeetingAtAGlance: React.FC<MeetingAtAGlanceProps> = ({
             Speakers
           </div>
           <div className="text-lg font-black text-white">{speakerStats.detectedCount} Detected</div>
-          <div className="text-[10px] text-cyan-400 font-medium">PyAnnote Community-1</div>
+          <div className="text-[10px] text-cyan-400 font-medium">Transcript speaker labels</div>
         </div>
       </div>
 

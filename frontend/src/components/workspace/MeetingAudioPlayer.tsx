@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState, useCallback } from 'react';
+import React, { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import {
   Play,
   Pause,
@@ -10,25 +10,31 @@ import {
   Sliders,
 } from 'lucide-react';
 import { formatTimeSeconds } from '../../utils/speakerUtils';
+import type { ApiTranscriptSegment } from '../../types';
+import { nextSpeechPosition, pacingRate, speechIntervals } from '../../utils/speechPlayback';
 
 interface MeetingAudioPlayerProps {
   audioUrl: string;
+  getToken: () => Promise<string | null>;
   fallbackDuration?: number | null;
   currentTime: number;
   onTimeUpdate: (time: number) => void;
   onSeek: (seconds: number) => void;
   audioRef: React.RefObject<HTMLAudioElement | null>;
+  segments?: ApiTranscriptSegment[];
 }
 
 const PLAYBACK_RATES = [0.75, 1.0, 1.25, 1.5, 2.0];
 
 export const MeetingAudioPlayer: React.FC<MeetingAudioPlayerProps> = ({
   audioUrl,
+  getToken,
   fallbackDuration = 0,
   currentTime,
   onTimeUpdate,
   onSeek,
   audioRef,
+  segments = [],
 }) => {
   const [isPlaying, setIsPlaying] = useState(false);
   const [duration, setDuration] = useState(fallbackDuration || 0);
@@ -37,7 +43,72 @@ export const MeetingAudioPlayer: React.FC<MeetingAudioPlayerProps> = ({
   const [playbackRate, setPlaybackRate] = useState(1.0);
   const [isLoading, setIsLoading] = useState(true);
   const [hasError, setHasError] = useState(false);
+  const [audioError, setAudioError] = useState<string | null>(null);
+  const [playbackUrl, setPlaybackUrl] = useState<string | null>(null);
   const [showSpeedMenu, setShowSpeedMenu] = useState(false);
+  const [skipSilence, setSkipSilence] = useState(false);
+  const [adaptiveSpeed, setAdaptiveSpeed] = useState(false);
+  const intervals = useMemo(() => speechIntervals(segments, duration), [segments, duration]);
+  const getTokenRef = useRef(getToken);
+  getTokenRef.current = getToken;
+
+  // The meeting audio endpoint requires the Clerk bearer token, which a native
+  // <audio src> request cannot send. Fetch once and let the browser play the blob.
+  useEffect(() => {
+    const controller = new AbortController();
+    let objectUrl: string | null = null;
+    setPlaybackUrl(null);
+    setIsPlaying(false);
+    setIsLoading(true);
+    setHasError(false);
+    setAudioError(null);
+    setSkipSilence(false);
+    setAdaptiveSpeed(false);
+
+    const loadAudio = async () => {
+      const token = await getTokenRef.current();
+      if (!token) throw new Error('Your session has expired. Refresh the page and sign in again.');
+      const response = await fetch(audioUrl, {
+        headers: { Authorization: `Bearer ${token}` },
+        signal: controller.signal,
+      });
+      if (!response.ok) throw new Error('Could not load this recording. Refresh the page and try again.');
+      const blob = await response.blob();
+      if (!blob.size) throw new Error('This recording is empty.');
+      objectUrl = URL.createObjectURL(blob);
+      if (controller.signal.aborted) {
+        URL.revokeObjectURL(objectUrl);
+        objectUrl = null;
+      } else {
+        setPlaybackUrl(objectUrl);
+      }
+    };
+
+    loadAudio().catch((error: unknown) => {
+      if (controller.signal.aborted) return;
+      setIsLoading(false);
+      setHasError(true);
+      setAudioError(error instanceof Error ? error.message : 'Could not load this recording.');
+    });
+
+    return () => {
+      controller.abort();
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [audioUrl]);
+
+  useEffect(() => {
+    const audio = audioRef.current;
+    if (!audio) return;
+    audio.playbackRate = adaptiveSpeed ? pacingRate(currentTime, segments, playbackRate) : playbackRate;
+    if (skipSilence && isPlaying && !audio.seeking) {
+      const target = nextSpeechPosition(audio.currentTime, intervals);
+      if (target !== null && (!Number.isFinite(audio.duration) || target < audio.duration)) {
+        audio.currentTime = target;
+        onTimeUpdate(target);
+      }
+    }
+  }, [adaptiveSpeed, skipSilence, isPlaying, currentTime, segments, playbackRate, intervals, audioRef, onTimeUpdate]);
 
   // Sync fallbackDuration if duration not yet loaded from media
   useEffect(() => {
@@ -85,6 +156,7 @@ export const MeetingAudioPlayer: React.FC<MeetingAudioPlayerProps> = ({
     const handleError = () => {
       setIsLoading(false);
       setHasError(true);
+      setAudioError('The browser could not play this recording.');
     };
 
     // If audio is already loaded/cached in browser, extract immediately
@@ -118,7 +190,7 @@ export const MeetingAudioPlayer: React.FC<MeetingAudioPlayerProps> = ({
 
   const togglePlay = useCallback(() => {
     const audio = audioRef.current;
-    if (!audio) return;
+    if (!audio || !playbackUrl) return;
 
     if (isPlaying) {
       audio.pause();
@@ -127,7 +199,7 @@ export const MeetingAudioPlayer: React.FC<MeetingAudioPlayerProps> = ({
         console.warn('Audio play request interrupted:', err);
       });
     }
-  }, [isPlaying, audioRef]);
+  }, [isPlaying, audioRef, playbackUrl]);
 
   const handleSliderChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const val = parseFloat(e.target.value);
@@ -182,7 +254,7 @@ export const MeetingAudioPlayer: React.FC<MeetingAudioPlayerProps> = ({
       {/* Hidden Native Audio Element */}
       <audio
         ref={audioRef as React.LegacyRef<HTMLAudioElement>}
-        src={audioUrl}
+        src={playbackUrl || undefined}
         preload="auto"
       />
 
@@ -201,7 +273,7 @@ export const MeetingAudioPlayer: React.FC<MeetingAudioPlayerProps> = ({
           {/* Play / Pause Toggle */}
           <button
             onClick={togglePlay}
-            disabled={hasError}
+            disabled={hasError || isLoading}
             className="w-11 h-11 rounded-full bg-[#8B5CF6] hover:bg-[#7c3aed] disabled:opacity-40 text-white flex items-center justify-center cursor-pointer shadow-lg shadow-[#8B5CF6]/30 transition-transform active:scale-95 shrink-0"
           >
             {isLoading && !isPlaying ? (
@@ -317,6 +389,11 @@ export const MeetingAudioPlayer: React.FC<MeetingAudioPlayerProps> = ({
           </div>
         </div>
       </div>
+      {audioError && <p role="alert" className="text-xs text-rose-400">{audioError}</p>}
+      {!!segments.length && <div className="flex flex-wrap gap-4 text-xs text-slate-400">
+        <label className="flex items-center gap-2 cursor-pointer" title="Uses saved speech timestamps with padding. Untranscribed sound may be skipped; turn off to hear the original recording."><input type="checkbox" checked={skipSilence} onChange={e => setSkipSilence(e.target.checked)} className="accent-violet-500" />Skip silence (transcript gaps)</label>
+        <label className="flex items-center gap-2 cursor-pointer" title="Adjusts your selected speed using approximate words per minute; turn off to keep a fixed speed."><input type="checkbox" checked={adaptiveSpeed} onChange={e => setAdaptiveSpeed(e.target.checked)} className="accent-violet-500" />Adaptive speed</label>
+      </div>}
     </div>
   );
 };

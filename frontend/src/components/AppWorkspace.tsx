@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import useSWR, { useSWRConfig } from 'swr';
 import {
   LayoutDashboard,
   FileText,
@@ -59,6 +60,7 @@ import {
   TaskPriority,
   TaskStatus,
   MeetingStatus,
+  isProcessingStatus,
   ApiWorkspace,
   ApiWorkspaceMember,
   ApiMeetingListItem,
@@ -92,6 +94,7 @@ import {
   useSearch,
   uploadMeetingAudio,
   createWorkspaceApi,
+  createDemoWorkspaceApi,
   updateWorkspaceApi,
   inviteWorkspaceMemberApi,
   removeWorkspaceMemberApi,
@@ -101,6 +104,9 @@ import {
   sendChatMessageApi,
   deleteMeetingApi,
   updateMeetingApi,
+  updateMeetingSummaryApi,
+  updateDecisionApi,
+  deleteDecisionApi,
   retryMeetingApi,
   deleteWorkspaceApi,
   setupDiscordWebhookApi,
@@ -112,11 +118,23 @@ import {
   stopLiveMeeting,
   ZoomCloudRecording,
   setClerkUserContext,
+  updateMeetingDisplayScript,
 } from '../services/api';
 import { LiveMeetingModal } from './LiveMeetingModal';
 import { MeetingHeader } from './workspace/MeetingHeader';
+import { PilotVoicePanel } from './workspace/PilotVoicePanel';
+import { PilotVoiceSettings } from './workspace/PilotVoiceSettings';
+import { MeetingLanguageSelect, MeetingScriptContext } from './workspace/MeetingLanguageDisplay';
+import { MEETING_LANGUAGES } from '../utils/meetingLanguage';
+import { LiveInsights } from './workspace/LiveInsights';
+import { WorkspaceManagerContext, isWorkspaceManager } from '../utils/workspacePermissions';
+import { JoinWorkspaceModal, WorkspaceAccessPanel, WorkspaceOnboarding } from './workspace/WorkspaceAccessPanel';
+import type { JoinRequest } from './workspace/WorkspaceAccessPanel';
+import { MeetingIdentities } from './workspace/MeetingIdentities';
 import { MeetingAtAGlance } from './workspace/MeetingAtAGlance';
 import { MeetingAudioPlayer } from './workspace/MeetingAudioPlayer';
+import { MeetingReviewTools } from './workspace/MeetingReviewTools';
+import { MeetingBookmarks } from './workspace/MeetingBookmarks';
 import { DiarizedTranscript } from './workspace/DiarizedTranscript';
 import { ExecutiveIntelligence } from './workspace/ExecutiveIntelligence';
 import { ActionItemsView } from './workspace/ActionItemsView';
@@ -160,6 +178,8 @@ export const AppWorkspace: React.FC<AppWorkspaceProps> = ({ onBackToLanding }) =
   const { user } = useUser();
   const { getToken } = useAuth();
   const { signOut } = useClerk();
+  const { mutate: mutateCache } = useSWRConfig();
+  const previousRole = useRef<string | undefined>(undefined);
 
   // Tab State
   const [activeTab, setActiveTab] = useState<
@@ -189,9 +209,11 @@ export const AppWorkspace: React.FC<AppWorkspaceProps> = ({ onBackToLanding }) =
   }, [user]);
 
   const [showWorkspaceSwitcher, setShowWorkspaceSwitcher] = useState(false);
+  const [joinWorkspaceOpen, setJoinWorkspaceOpen] = useState(false);
   const [newWorkspaceModalOpen, setNewWorkspaceModalOpen] = useState(false);
   const [newWorkspaceName, setNewWorkspaceName] = useState('');
   const [creatingWorkspace, setCreatingWorkspace] = useState(false);
+  const [exploringDemo, setExploringDemo] = useState(false);
 
   // Delete Workspace Modal & Confirmation States
   const [deleteWorkspaceModalOpen, setDeleteWorkspaceModalOpen] = useState(false);
@@ -202,17 +224,20 @@ export const AppWorkspace: React.FC<AppWorkspaceProps> = ({ onBackToLanding }) =
 
   // Selected Meeting Selection
   const [selectedMeetingId, setSelectedMeetingId] = useState<string | null>(null);
-  const [meetingSubTab, setMeetingSubTab] = useState<'summary' | 'transcript' | 'tasks' | 'chat'>('summary');
+  const [meetingSubTab, setMeetingSubTab] = useState<'summary' | 'transcript' | 'tasks' | 'chat' | 'review'>('summary');
 
   // Quick Upload Form State
   const [uploadModalOpen, setUploadModalOpen] = useState(false);
   const [uploadTitle, setUploadTitle] = useState('');
+  const [uploadLanguage, setUploadLanguage] = useState('en');
+  const [savingDisplayScript, setSavingDisplayScript] = useState(false);
   const [uploadFile, setUploadFile] = useState<File | null>(null);
   const [uploading, setUploading] = useState(false);
   const [uploadProgressMsg, setUploadProgressMsg] = useState('');
 
   // Step C1 & C3: Live Google Meet Capture & Legal Consent State
   const [liveMeetModalOpen, setLiveMeetModalOpen] = useState(false);
+  const [retryLiveMeetingUrl, setRetryLiveMeetingUrl] = useState('');
   const [stoppingLiveMeeting, setStoppingLiveMeeting] = useState(false);
 
   // Step B1: In-Browser Live Microphone Recording State
@@ -277,7 +302,7 @@ export const AppWorkspace: React.FC<AppWorkspaceProps> = ({ onBackToLanding }) =
   const [savingWorkspaceName, setSavingWorkspaceName] = useState(false);
 
   // Settings subtab
-  const [settingsTab, setSettingsTab] = useState<'profile' | 'workspace' | 'theme' | 'billing'>('profile');
+  const [settingsTab, setSettingsTab] = useState<'profile' | 'workspace' | 'voice' | 'theme' | 'billing'>('profile');
 
   // Debounce search input (300ms)
   useEffect(() => {
@@ -289,35 +314,67 @@ export const AppWorkspace: React.FC<AppWorkspaceProps> = ({ onBackToLanding }) =
 
   // SWR Data Fetching Hooks
   const { data: authSession } = useAuthMe(getToken);
-  const { data: workspaces, mutate: mutateWorkspaces } = useWorkspaces(getToken);
+  const { data: workspaces, error: workspacesError, isLoading: workspacesLoading, mutate: mutateWorkspaces } = useWorkspaces(getToken);
 
-  // Auto-select or create first workspace
+  // Select only an approved membership; organization creation is an explicit choice.
   useEffect(() => {
     if (workspaces && workspaces.length > 0) {
       if (!activeWorkspaceId || !workspaces.some((w) => w.id === activeWorkspaceId)) {
         setActiveWorkspaceId(workspaces[0].id);
       }
-    } else if (workspaces && workspaces.length === 0 && user) {
-      // Auto-provision initial workspace for new user
-      const defaultName = user.firstName ? `${user.firstName}'s Workspace` : 'My Workspace';
-      createWorkspaceApi(defaultName, getToken)
-        .then((created) => {
-          mutateWorkspaces();
-          setActiveWorkspaceId(created.id);
-        })
-        .catch((err) => console.error('Failed to auto-create workspace:', err));
+    } else if (workspaces?.length === 0) {
+      setActiveWorkspaceId(null);
+      setSelectedMeetingId(null);
     }
   }, [workspaces, activeWorkspaceId, user, getToken, mutateWorkspaces]);
+
+  const enterApprovedWorkspace = async (workspaceId: string) => {
+    const available = await mutateWorkspaces();
+    if (!available?.some(w => w.id === workspaceId)) throw new Error('Workspace access is not available. Ask your manager to confirm your membership.');
+    setActiveWorkspaceId(workspaceId);
+    setSelectedMeetingId(null);
+    setActiveTab('dashboard');
+    setJoinWorkspaceOpen(false);
+  };
 
   const activeWorkspace = useMemo(
     () => workspaces?.find((w) => w.id === activeWorkspaceId) || workspaces?.[0],
     [workspaces, activeWorkspaceId]
   );
+  const canManageWorkspace = isWorkspaceManager(activeWorkspace?.current_role);
+  const isWorkspaceOwner = activeWorkspace?.current_role === 'owner';
+  useEffect(() => {
+    if (previousRole.current && previousRole.current !== activeWorkspace?.current_role) {
+      // Remove results fetched with the old role before asking the API again.
+      void mutateCache(key => typeof key === 'string' && (key.includes('/tasks') || key.includes('/chat') || key.includes('/search') || key.includes('/analytics')),
+        undefined, { revalidate: true });
+      setLocalChatMessages([]);
+    }
+    previousRole.current = activeWorkspace?.current_role;
+  }, [activeWorkspace?.current_role, mutateCache]);
+  const { data: pendingJoinRequests } = useSWR<JoinRequest[]>(
+    canManageWorkspace && activeWorkspace ? `/api/v1/workspaces/${activeWorkspace.id}/join-requests` : null,
+    path => apiFetch<JoinRequest[]>(path, {}, getToken), { refreshInterval: 15000 });
+
+  const handleExploreDemo = async () => {
+    setExploringDemo(true);
+    try {
+      const demo = await createDemoWorkspaceApi(getToken);
+      await mutateWorkspaces();
+      setActiveWorkspaceId(demo.id);
+      setSelectedMeetingId(null);
+      setActiveTab('dashboard');
+      showToast('Sample workspace ready. Explore meetings, evidence and Ask MeetPilot.');
+    } catch (err: any) {
+      showToast(err.message || 'Could not open demo workspace', 'error');
+    } finally { setExploringDemo(false); }
+  };
 
   // Fetch workspace members, meetings, workspace tasks, and notifications
   const { data: members, mutate: mutateMembers } = useWorkspaceMembers(activeWorkspace?.id, getToken);
   const { data: meetings, mutate: mutateMeetings } = useMeetings(activeWorkspace?.id, getToken);
-  const { data: workspaceTasks, mutate: mutateTasks } = useWorkspaceTasks(activeWorkspace?.id, getToken);
+  const { data: workspaceTaskRows, mutate: mutateTasks } = useWorkspaceTasks(activeWorkspace?.id, getToken);
+  const workspaceTasks = canManageWorkspace ? workspaceTaskRows : workspaceTaskRows?.filter(task => task.assignee_id === authSession?.user.id);
   const { data: integrations, mutate: mutateIntegrations } = useWorkspaceIntegrations(activeWorkspace?.id, getToken);
   const { data: workspaceAnalytics, mutate: mutateAnalytics } = useWorkspaceAnalytics(activeWorkspace?.id, getToken);
   const { data: workspaceDocs } = useWorkspaceDocuments(activeWorkspace?.id, getToken);
@@ -348,13 +405,26 @@ export const AppWorkspace: React.FC<AppWorkspaceProps> = ({ onBackToLanding }) =
 
   // Active meeting detail & associated data
   const { data: meetingDetail, mutate: mutateMeetingDetail } = useMeetingDetail(selectedMeetingId, getToken);
-  const isMeetingProcessing = meetingDetail?.status === 'queued' || meetingDetail?.status === 'processing';
+  const canManageMeeting = canManageWorkspace || Boolean(authSession?.user.id && meetingDetail?.created_by === authSession.user.id);
+  const isMeetingProcessing = isProcessingStatus(meetingDetail?.status);
+  const deferMeetingResults = isMeetingProcessing && meetingDetail?.source !== 'live';
 
-  const { data: meetingSummary, mutate: mutateMeetingSummary } = useMeetingSummary(selectedMeetingId, isMeetingProcessing, getToken);
-  const { data: meetingTranscript, mutate: mutateMeetingTranscript } = useMeetingTranscript(selectedMeetingId, isMeetingProcessing, getToken);
-  const { data: meetingDecisions, mutate: mutateMeetingDecisions } = useMeetingDecisions(selectedMeetingId, isMeetingProcessing, getToken);
-  const { data: meetingTasks, mutate: mutateMeetingTasks } = useMeetingTasks(selectedMeetingId, isMeetingProcessing, getToken);
+  const { data: meetingSummary, mutate: mutateMeetingSummary } = useMeetingSummary(selectedMeetingId, deferMeetingResults, getToken);
+  const { data: meetingTranscript, mutate: mutateMeetingTranscript } = useMeetingTranscript(selectedMeetingId, deferMeetingResults, getToken);
+  const { data: meetingDecisions, mutate: mutateMeetingDecisions } = useMeetingDecisions(selectedMeetingId, deferMeetingResults, getToken);
+  const { data: meetingTaskRows, mutate: mutateMeetingTasks } = useMeetingTasks(selectedMeetingId, deferMeetingResults, getToken);
+  const meetingTasks = canManageWorkspace ? meetingTaskRows : meetingTaskRows?.filter(task => task.assignee_id === authSession?.user.id);
   const { data: serverChatHistory, mutate: mutateChat } = useMeetingChat(selectedMeetingId, getToken);
+
+  const hasSavedMeetingData = Boolean(meetingTranscript?.length || meetingSummary || meetingDecisions?.length || meetingTasks?.length || meetingDetail?.audio_url);
+  const showMeetingResults = meetingDetail?.status === 'completed' ||
+    (meetingDetail?.source === 'live' && meetingDetail.status !== 'in_progress' && hasSavedMeetingData);
+
+  useEffect(() => {
+    if (meetingDetail?.status === 'completed') {
+      void Promise.allSettled([mutateMeetingSummary(), mutateMeetingTranscript(), mutateMeetingDecisions(), mutateMeetingTasks()]);
+    }
+  }, [meetingDetail?.id, meetingDetail?.status, mutateMeetingSummary, mutateMeetingTranscript, mutateMeetingDecisions, mutateMeetingTasks]);
 
   const speakerStats = useMemo(
     () => getMeetingSpeakerStats(meetingDetail, meetingTranscript),
@@ -406,6 +476,8 @@ export const AppWorkspace: React.FC<AppWorkspaceProps> = ({ onBackToLanding }) =
 
   // Handle Seek Audio to Timestamp
   const handleSeekToTime = (seconds: number) => {
+    setCurrentTime(seconds);
+    setMeetingSubTab('transcript');
     if (audioRef.current) {
       audioRef.current.currentTime = seconds;
       audioRef.current.play().catch(() => {});
@@ -479,7 +551,7 @@ export const AppWorkspace: React.FC<AppWorkspaceProps> = ({ onBackToLanding }) =
     setUploadProgressMsg('Uploading audio file to MeetPilot AI backend...');
 
     try {
-      const created = await uploadMeetingAudio(activeWorkspaceId, title, uploadFile, getToken);
+      const created = await uploadMeetingAudio(activeWorkspaceId, title, uploadFile, getToken, uploadLanguage);
       setUploadProgressMsg('Audio uploaded! Ingestion pipeline queued.');
       await mutateMeetings();
       setSelectedMeetingId(created.id);
@@ -549,7 +621,7 @@ export const AppWorkspace: React.FC<AppWorkspaceProps> = ({ onBackToLanding }) =
         const title = liveRecordTitle.trim() || defaultTitle;
         const audioFile = new File([audioBlob], `${title.replace(/\s+/g, '_')}.webm`, { type: 'audio/webm' });
 
-        const created = await uploadMeetingAudio(activeWorkspaceId, title, audioFile, getToken);
+        const created = await uploadMeetingAudio(activeWorkspaceId, title, audioFile, getToken, uploadLanguage);
         await mutateMeetings();
         setSelectedMeetingId(created.id);
         setRecordModalOpen(false);
@@ -558,7 +630,7 @@ export const AppWorkspace: React.FC<AppWorkspaceProps> = ({ onBackToLanding }) =
         setRecordingSeconds(0);
         setActiveTab('meeting');
         setMeetingSubTab('summary');
-        showToast(`"${title}" recorded & queued for Gemini transcription!`);
+        showToast(`"${title}" recorded and queued for transcription.`);
       } catch (err: any) {
         setRecordError(err.message || 'Failed to submit audio recording.');
         showToast(err.message || 'Failed to submit audio recording', 'error');
@@ -740,17 +812,52 @@ export const AppWorkspace: React.FC<AppWorkspaceProps> = ({ onBackToLanding }) =
     }
   };
 
+  const handleEditSummary = async (overview: string) => {
+    if (!selectedMeetingId) return;
+    try {
+      await updateMeetingSummaryApi(selectedMeetingId, { overview }, getToken);
+      await mutateMeetingSummary();
+      showToast('Summary updated');
+    } catch (err: any) {
+      showToast(err.message || 'Could not update summary', 'error');
+      throw err;
+    }
+  };
+
+  const handleEditDecision = async (decisionId: string, topic: string, outcome: string) => {
+    if (!selectedMeetingId) return;
+    try {
+      await updateDecisionApi(selectedMeetingId, decisionId, { topic, outcome }, getToken);
+      await mutateMeetingDecisions();
+      showToast('Decision updated');
+    } catch (err: any) {
+      showToast(err.message || 'Could not update decision', 'error');
+      throw err;
+    }
+  };
+
+  const handleDeleteDecision = async (decisionId: string) => {
+    if (!selectedMeetingId || !window.confirm('Remove this decision? The source transcript will remain.')) return;
+    try {
+      await deleteDecisionApi(selectedMeetingId, decisionId, getToken);
+      await mutateMeetingDecisions();
+      showToast('Decision removed');
+    } catch (err: any) {
+      showToast(err.message || 'Could not remove decision', 'error');
+    }
+  };
+
   const handleAddMeetingTask = async (title: string, assignee: string, priority: TaskPriority, dueDate: string) => {
     if (!activeWorkspaceId || !selectedMeetingId || !title.trim()) return;
     try {
       await createTaskApi(
-        activeWorkspaceId,
         {
           title: title.trim(),
+          workspace_id: activeWorkspaceId,
           meeting_id: selectedMeetingId,
           assignee_name: assignee.trim() || undefined,
           priority,
-          due_date: dueDate || 'This Week',
+          due_date: dueDate || undefined,
         },
         getToken
       );
@@ -773,6 +880,18 @@ export const AppWorkspace: React.FC<AppWorkspaceProps> = ({ onBackToLanding }) =
       showToast(`Task status updated to ${newStatus.toUpperCase()}`);
     } catch (err: any) {
       showToast(err.message || 'Failed to update task status', 'error');
+    }
+  };
+
+  const handleEditTask = async (taskId: string, updates: { title: string; assignee_name: string | null; priority: TaskPriority; due_date: string | null }) => {
+    try {
+      await updateTaskApi(taskId, updates, getToken);
+      await mutateTasks();
+      await mutateMeetingTasks();
+      showToast('Task updated');
+    } catch (err: any) {
+      showToast(err.message || 'Could not update task', 'error');
+      throw err;
     }
   };
 
@@ -865,7 +984,7 @@ export const AppWorkspace: React.FC<AppWorkspaceProps> = ({ onBackToLanding }) =
       setZoomPickerOpen(false);
       setActiveTab('meeting');
       setMeetingSubTab('summary');
-      showToast(`Zoom recording "${rec.topic}" queued for Gemini transcription!`);
+      showToast(`Zoom recording "${rec.topic}" queued for transcription.`);
     } catch (err: any) {
       showToast(err.message || 'Failed to import Zoom recording', 'error');
     } finally {
@@ -1186,7 +1305,15 @@ export const AppWorkspace: React.FC<AppWorkspaceProps> = ({ onBackToLanding }) =
     }));
   }, [meetingTranscript]);
 
+  if (!activeWorkspace) {
+    return <WorkspaceOnboarding getToken={getToken} onEnter={enterApprovedWorkspace}
+      loading={workspacesLoading || (!workspaces && !workspacesError)}
+      loadError={workspacesError ? (workspacesError instanceof Error ? workspacesError.message : 'Could not load your workspaces') : undefined}
+      onRetry={() => void mutateWorkspaces()} onBack={onBackToLanding} onSignOut={() => void signOut()} />;
+  }
+
   return (
+    <WorkspaceManagerContext.Provider value={canManageWorkspace}>
     <div className="min-h-screen bg-[#09090B] text-slate-100 flex flex-col font-sans selection:bg-[#8B5CF6]/30 selection:text-white antialiased">
       {/* Top Header Bar */}
       <header className="h-16 border-b border-[#27272A] bg-[#111113] px-4 sm:px-6 flex items-center justify-between sticky top-0 z-40">
@@ -1211,6 +1338,7 @@ export const AppWorkspace: React.FC<AppWorkspaceProps> = ({ onBackToLanding }) =
               <span className="max-w-[140px] sm:max-w-[200px] truncate tracking-tight text-white font-bold">
                 {activeWorkspace?.name || 'Loading Workspace...'}
               </span>
+              {activeWorkspace?.is_demo && <span className="text-[9px] text-amber-300 border border-amber-400/40 rounded px-1">SAMPLE</span>}
               <ChevronRight
                 className={`w-3.5 h-3.5 text-slate-400 group-hover:text-slate-200 transition-transform duration-200 ${
                   showWorkspaceSwitcher ? 'rotate-90 text-[#8B5CF6]' : ''
@@ -1247,6 +1375,8 @@ export const AppWorkspace: React.FC<AppWorkspaceProps> = ({ onBackToLanding }) =
                 </div>
 
                 <div className="pt-2 border-t border-[#27272A] space-y-1">
+                  <button onClick={() => { setShowWorkspaceSwitcher(false); setJoinWorkspaceOpen(true); }}
+                    className="w-full rounded-xl bg-violet-600/20 px-3 py-2 text-xs font-bold text-violet-300">Join Workspace with Code</button>
                   <button
                     onClick={() => {
                       setShowWorkspaceSwitcher(false);
@@ -1258,7 +1388,7 @@ export const AppWorkspace: React.FC<AppWorkspaceProps> = ({ onBackToLanding }) =
                     <span>Create Workspace</span>
                   </button>
 
-                  {activeWorkspace && (
+                  {activeWorkspace && isWorkspaceOwner && (
                     <button
                       onClick={() => {
                         setShowWorkspaceSwitcher(false);
@@ -1450,9 +1580,11 @@ export const AppWorkspace: React.FC<AppWorkspaceProps> = ({ onBackToLanding }) =
             >
               <Users className="w-4 h-4 shrink-0" />
               <span className="hidden sm:inline">Team Members</span>
+              {!!pendingJoinRequests?.length && <span className="rounded-full bg-amber-600 px-2 py-0.5 text-white">{pendingJoinRequests.length}</span>}
             </button>
 
             <button
+              disabled={!canManageWorkspace}
               onClick={() => setActiveTab('integrations')}
               className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-semibold transition-colors cursor-pointer ${
                 activeTab === 'integrations'
@@ -1499,6 +1631,7 @@ export const AppWorkspace: React.FC<AppWorkspaceProps> = ({ onBackToLanding }) =
 
         {/* Central Workspace Canvas */}
         <main className="flex-1 overflow-y-auto p-4 sm:p-6 lg:p-8 space-y-6 bg-[#09090B]">
+          {canManageWorkspace && !!pendingJoinRequests?.length && activeTab !== 'team' && <div role="status" className="flex items-center justify-between rounded-xl border border-amber-500/30 bg-amber-950/20 p-4 text-xs text-amber-200"><span>{pendingJoinRequests.length} teammate request(s) waiting for your approval.</span><button onClick={() => setActiveTab('team')} className="rounded-lg bg-amber-700 px-3 py-2 text-white">Review requests</button></div>}
           {/* TAB 1: DASHBOARD OVERVIEW */}
           {activeTab === 'dashboard' && (
             <div className="space-y-6 animate-fadeIn">
@@ -1512,22 +1645,35 @@ export const AppWorkspace: React.FC<AppWorkspaceProps> = ({ onBackToLanding }) =
                   />
                   <div>
                     <h2 className="text-2xl font-extrabold text-white">
-                      Welcome back, {user?.firstName || 'Pilot'} 👋
+                      {totalMeetingsCount === 0 ? `Welcome to MeetPilot, ${user?.firstName || 'Pilot'}` : `Welcome back, ${user?.firstName || 'Pilot'}`}
                     </h2>
                     <p className="text-xs text-slate-400 mt-1">
                       {activeWorkspace?.name} · {completedMeetingsCount} completed meetings · {pendingTasksList.length} pending action items.
                     </p>
+                    {activeWorkspace?.is_demo && <p className="text-xs text-amber-300 mt-1">This workspace contains sample data only.</p>}
                   </div>
                 </div>
 
                 <button
-                  onClick={() => setUploadModalOpen(true)}
+                  onClick={() => activeWorkspace?.is_demo ? setNewWorkspaceModalOpen(true) : setUploadModalOpen(true)}
                   className="px-4 py-2 rounded-xl bg-[#8B5CF6] hover:bg-[#7c3aed] text-white font-bold text-xs flex items-center gap-2 cursor-pointer shadow-lg shadow-[#8B5CF6]/20"
                 >
                   <Upload className="w-4 h-4" />
-                  <span>Upload Meeting Audio</span>
+                  <span>{activeWorkspace?.is_demo ? 'Create Real Workspace' : 'Upload Meeting Audio'}</span>
                 </button>
               </div>
+
+              {totalMeetingsCount === 0 && !activeWorkspace?.is_demo && (
+                <div className="p-6 rounded-2xl border border-[#8B5CF6]/35 bg-[#8B5CF6]/10 space-y-3">
+                  <h3 className="text-lg font-bold text-white">Your first meeting is the starting point</h3>
+                  <p className="text-sm text-slate-300">Upload a recording, watch the transcript become a summary and action items, then ask a question backed by the conversation.</p>
+                  <div className="flex flex-wrap gap-3">
+                    <button onClick={() => setUploadModalOpen(true)} className="px-4 py-2 rounded-lg bg-[#8B5CF6] text-white text-xs font-bold">Upload first meeting</button>
+                    <button onClick={handleExploreDemo} disabled={exploringDemo} className="px-4 py-2 rounded-lg border border-[#8B5CF6]/60 text-white text-xs font-bold disabled:opacity-50">
+                      {exploringDemo ? 'Opening sample…' : 'Explore Demo'}</button>
+                  </div>
+                </div>
+              )}
 
               {/* Stats Overview Grid */}
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -1556,7 +1702,7 @@ export const AppWorkspace: React.FC<AppWorkspaceProps> = ({ onBackToLanding }) =
                 <div className="p-4 rounded-xl bg-[#111113] border border-[#27272A] space-y-1">
                   <div className="text-[11px] font-mono uppercase text-slate-500">Completed Tasks</div>
                   <div className="text-2xl font-extrabold text-white">{tasksByStatus.done.length}</div>
-                  <div className="text-[10px] text-emerald-400 font-semibold">100% indexed in memory</div>
+                  <div className="text-[10px] text-emerald-400 font-semibold">Saved in workspace tasks</div>
                 </div>
               </div>
 
@@ -1602,7 +1748,7 @@ export const AppWorkspace: React.FC<AppWorkspaceProps> = ({ onBackToLanding }) =
                                 className={`text-[10px] font-mono px-2 py-0.5 rounded font-bold ${
                                   m.status === 'completed'
                                     ? 'bg-emerald-500/20 text-emerald-300'
-                                    : m.status === 'processing'
+                                    : isProcessingStatus(m.status) && m.status !== 'queued'
                                     ? 'bg-[#8B5CF6]/20 text-[#8B5CF6] animate-pulse'
                                     : m.status === 'queued'
                                     ? 'bg-amber-500/20 text-amber-300'
@@ -1695,16 +1841,9 @@ export const AppWorkspace: React.FC<AppWorkspaceProps> = ({ onBackToLanding }) =
                   <FileText className="w-12 h-12 text-[#8B5CF6] mx-auto animate-bounce" />
                   <h3 className="text-lg font-bold text-white">No Meetings in this Workspace</h3>
                   <p className="text-xs text-slate-400 max-w-md mx-auto">
-                    Upload an MP3, WAV, or M4A recording or join a live Google Meet to trigger speech diarization, automated summarization, and action item detection.
+                    Upload an MP3, WAV, or M4A recording to create a timestamped transcript, summary, tasks, and decisions. Review the results when processing finishes.
                   </p>
                   <div className="flex items-center justify-center gap-3">
-                    <button
-                      onClick={() => setLiveMeetModalOpen(true)}
-                      className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white text-xs font-bold shadow-lg shadow-emerald-500/20 inline-flex items-center gap-2 cursor-pointer"
-                    >
-                      <Video className="w-4 h-4" />
-                      <span>Join Live Google Meet</span>
-                    </button>
                     <button
                       onClick={() => setUploadModalOpen(true)}
                       className="px-5 py-2.5 rounded-xl bg-[#8B5CF6] hover:bg-[#7c3aed] text-white text-xs font-bold shadow-lg shadow-[#8B5CF6]/20 inline-flex items-center gap-2 cursor-pointer"
@@ -1712,14 +1851,22 @@ export const AppWorkspace: React.FC<AppWorkspaceProps> = ({ onBackToLanding }) =
                       <Upload className="w-4 h-4" />
                       <span>Upload Audio</span>
                     </button>
+                    <button
+                      onClick={() => setLiveMeetModalOpen(true)}
+                      className="px-5 py-2.5 rounded-xl bg-[#18181b] hover:bg-[#27272A] text-slate-300 text-xs font-bold border border-[#27272A] inline-flex items-center gap-2 cursor-pointer"
+                    >
+                      <Video className="w-4 h-4" />
+                      <span>Live meeting options</span>
+                    </button>
                   </div>
                 </div>
               )}
 
               {meetingDetail && (
-                <>
+                <MeetingScriptContext.Provider value={meetingDetail.display_script || 'original'}>
                   {/* Meeting Header */}
                   <MeetingHeader
+                    canManage={canManageMeeting}
                     meeting={meetingDetail}
                     allMeetings={meetings || []}
                     speakerStats={speakerStats}
@@ -1731,8 +1878,39 @@ export const AppWorkspace: React.FC<AppWorkspaceProps> = ({ onBackToLanding }) =
                     onExportPDF={handleExportPDF}
                   />
 
+                  <div className="flex flex-wrap items-center gap-3 rounded-xl border border-[#27272A] bg-[#111113] p-3 text-xs text-slate-300">
+                    <span>Meeting language: {MEETING_LANGUAGES.find(([code]) => code === (meetingDetail.transcription_language || meetingDetail.language_code))?.[1] || meetingDetail.language_name || 'Auto-detect'}</span>
+                    {['hi', 'bn', 'auto'].includes(meetingDetail.transcription_language || meetingDetail.language_code || '') && (
+                      <label className="flex items-center gap-2">Display
+                        <select aria-label="Meeting text display" value={meetingDetail.display_script || 'original'} disabled={savingDisplayScript || !canManageMeeting}
+                          onChange={async event => {
+                            const script = event.target.value as 'original' | 'romanized';
+                            setSavingDisplayScript(true);
+                            try {
+                              await updateMeetingDisplayScript(meetingDetail.id, script, getToken);
+                              await mutateMeetingDetail();
+                            } catch (err) { showToast(err instanceof Error ? err.message : 'Could not change display', 'error'); }
+                            finally { setSavingDisplayScript(false); }
+                          }} className="rounded-lg border border-[#3f3f46] bg-[#18181b] p-2 text-white">
+                          <option value="original">Original script</option>
+                          <option value="romanized">{(meetingDetail.transcription_language || meetingDetail.language_code) === 'hi' ? 'Hinglish' : (meetingDetail.transcription_language || meetingDetail.language_code) === 'bn' ? 'Benglish' : 'Roman letters (Hindi / Bengali)'}</option>
+                        </select>
+                      </label>
+                    )}
+                    {meetingDetail.display_script === 'romanized' && <span className="text-slate-500">Roman spellings are approximate. Original quotes are preserved.</span>}
+                  </div>
+
+                  {meetingDetail.status === 'in_progress' && (
+                    <>
+                      <PilotVoicePanel key={meetingDetail.id} meetingId={meetingDetail.id} getToken={getToken} isLive={meetingDetail.source === 'live' && meetingDetail.status === 'in_progress'} />
+                      <LiveInsights meetingId={meetingDetail.id} getToken={getToken} />
+                    </>
+                  )}
+
+                  {canManageWorkspace && <MeetingIdentities key={meetingDetail.id} meetingId={meetingDetail.id} members={members || []} getToken={getToken} />}
+
                   {/* Meeting At A Glance Strip */}
-                  {meetingDetail.status === 'completed' && (
+                  {showMeetingResults && (
                     <MeetingAtAGlance
                       durationSeconds={meetingDetail.duration_seconds}
                       speakerStats={speakerStats}
@@ -1743,6 +1921,10 @@ export const AppWorkspace: React.FC<AppWorkspaceProps> = ({ onBackToLanding }) =
                   )}
 
                   {/* Live Active Meeting View */}
+                  {meetingDetail.status === 'in_progress' && authSession?.user.id && <MeetingBookmarks
+                    key={`bookmarks-${meetingDetail.id}`} meetingId={meetingDetail.id} actorId={authSession.user.id}
+                    getToken={getToken} position={Math.max(0, ...(meetingTranscript || []).map(s => s.end_time))}
+                    hasTranscript={!!meetingTranscript?.length} isLive onSeek={handleSeekToTime} />}
                   {meetingDetail.status === 'in_progress' && (
                     <div className="p-6 rounded-2xl bg-[#111113] border border-rose-500/40 space-y-6 shadow-2xl shadow-rose-950/20">
                       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 p-4 rounded-xl bg-gradient-to-r from-rose-950/40 via-[#18181b] to-slate-900 border border-rose-500/30">
@@ -1759,14 +1941,14 @@ export const AppWorkspace: React.FC<AppWorkspaceProps> = ({ onBackToLanding }) =
                               </span>
                             </div>
                             <p className="text-xs text-slate-400 mt-0.5">
-                              Bot is connected to Google Meet ({meetingDetail.native_meeting_id || 'call'}). Real-time speech turns stream directly into memory.
+                              Native bot is joining or connected ({meetingDetail.native_meeting_id || 'call'}). Speech turns stream into MeetPilot memory after capture begins.
                             </p>
                           </div>
                         </div>
 
                         <button
                           onClick={() => handleStopLiveMeeting(meetingDetail.id)}
-                          disabled={stoppingLiveMeeting}
+                          disabled={stoppingLiveMeeting || !canManageMeeting}
                           className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-rose-600 via-rose-500 to-pink-600 hover:from-rose-500 hover:to-pink-500 text-white text-xs font-bold shadow-lg shadow-rose-500/25 flex items-center gap-2 cursor-pointer transition-all active:scale-95 shrink-0"
                         >
                           {stoppingLiveMeeting ? (
@@ -1795,10 +1977,12 @@ export const AppWorkspace: React.FC<AppWorkspaceProps> = ({ onBackToLanding }) =
                   )}
 
                   {/* Queued / Processing State Card */}
-                  {(meetingDetail.status === 'queued' || meetingDetail.status === 'processing') && (
+                  {isProcessingStatus(meetingDetail.status) && (
                     <ProcessingStateCard
                       status={meetingDetail.status}
                       meetingTitle={meetingDetail.title}
+                      retryAvailable={meetingDetail.retry_available}
+                      onRetry={handleRetryMeeting}
                     />
                   )}
 
@@ -1808,19 +1992,36 @@ export const AppWorkspace: React.FC<AppWorkspaceProps> = ({ onBackToLanding }) =
                       meetingId={meetingDetail.id}
                       meetingTitle={meetingDetail.title}
                       failureReason={meetingDetail.failure_reason}
+                      isLive={meetingDetail.source === 'live' && !hasSavedMeetingData && Boolean(meetingDetail.capture_failure_reason)}
+                      onNewLiveMeeting={() => {
+                        const code = meetingDetail.native_meeting_id;
+                        setRetryLiveMeetingUrl(code && /^[a-z]{3}-[a-z]{4}-[a-z]{3}$/i.test(code)
+                          ? `https://meet.google.com/${code}` : '');
+                        setLiveMeetModalOpen(true);
+                      }}
                       onRetry={handleRetryMeeting}
                       onOpenUpload={() => setUploadModalOpen(true)}
                       onDelete={() => handleDeleteMeeting(meetingDetail.id, meetingDetail.title)}
                     />
                   )}
 
+                  {meetingDetail.capture_failure_reason && meetingDetail.status !== 'failed' && (
+                    <div role="alert" className="rounded-xl border border-rose-500/30 bg-rose-950/20 p-4 text-sm text-rose-300">
+                      <p className="font-semibold">Meeting capture was interrupted</p>
+                      <p className="mt-1">The saved transcript and available analysis are shown below. Speech after the disconnection may be missing.</p>
+                      <details className="mt-2 text-xs"><summary className="cursor-pointer">Connection details</summary>{meetingDetail.capture_failure_reason}</details>
+                    </div>
+                  )}
+
                   {/* Completed Meeting Intelligence Hub */}
-                  {meetingDetail.status === 'completed' && (
+                  {showMeetingResults && (
                     <div className="space-y-6">
                       {/* Interactive Audio Player */}
                       {selectedMeetingId && meetingDetail.audio_url && (
                         <MeetingAudioPlayer
                           audioUrl={getAudioStreamUrl(selectedMeetingId)}
+                          segments={meetingTranscript || []}
+                          getToken={getToken}
                           fallbackDuration={meetingDetail.duration_seconds}
                           currentTime={currentTime}
                           onTimeUpdate={(t) => setCurrentTime(t)}
@@ -1878,7 +2079,14 @@ export const AppWorkspace: React.FC<AppWorkspaceProps> = ({ onBackToLanding }) =
                           <Bot className="w-3.5 h-3.5 text-indigo-300" />
                           <span>AI Assistant Chat</span>
                         </button>
+                        {authSession?.user.id && <button onClick={() => setMeetingSubTab('review')}
+                          className={`px-4 py-2 rounded-xl text-xs font-bold ${meetingSubTab === 'review' ? 'bg-violet-600 text-white' : 'text-slate-400 hover:text-white'}`}>Review tools</button>}
                       </div>
+
+                      {meetingSubTab === 'review' && authSession?.user.id && <MeetingReviewTools key={`${meetingDetail.id}:${authSession.user.id}`}
+                        meetingId={meetingDetail.id} workspaceId={meetingDetail.workspace_id}
+                        actorId={authSession.user.id} getToken={getToken} currentTime={currentTime}
+                        segments={meetingTranscript || []} onSeek={handleSeekToTime} />}
 
                       {/* Sub-Tab 1: Executive Intelligence & Decisions */}
                       {meetingSubTab === 'summary' && (
@@ -1886,6 +2094,9 @@ export const AppWorkspace: React.FC<AppWorkspaceProps> = ({ onBackToLanding }) =
                           summary={meetingSummary}
                           decisions={meetingDecisions || []}
                           onSeek={handleSeekToTime}
+                          onEditSummary={handleEditSummary}
+                          onEditDecision={handleEditDecision}
+                          onDeleteDecision={handleDeleteDecision}
                         />
                       )}
 
@@ -1909,6 +2120,8 @@ export const AppWorkspace: React.FC<AppWorkspaceProps> = ({ onBackToLanding }) =
                           onAddTask={handleAddMeetingTask}
                           onSeek={handleSeekToTime}
                           onOpenKanban={() => setActiveTab('kanban')}
+                          members={members || []}
+                          onUpdateTask={handleEditTask}
                         />
                       )}
 
@@ -1924,7 +2137,7 @@ export const AppWorkspace: React.FC<AppWorkspaceProps> = ({ onBackToLanding }) =
                       )}
                     </div>
                   )}
-                </>
+                </MeetingScriptContext.Provider>
               )}
             </div>
           )}
@@ -1958,6 +2171,7 @@ export const AppWorkspace: React.FC<AppWorkspaceProps> = ({ onBackToLanding }) =
                         <div className="flex items-start justify-between gap-2">
                           <div className="text-xs font-bold text-white">{t.title}</div>
                           <button
+                            disabled={!canManageWorkspace}
                             onClick={() => handleDeleteTask(t.id, t.title)}
                             title="Delete Task"
                             className="p-1 rounded text-slate-500 hover:text-rose-400 hover:bg-rose-500/10 transition-colors cursor-pointer"
@@ -1994,6 +2208,7 @@ export const AppWorkspace: React.FC<AppWorkspaceProps> = ({ onBackToLanding }) =
                         <div className="flex items-start justify-between gap-2">
                           <div className="text-xs font-bold text-white">{t.title}</div>
                           <button
+                            disabled={!canManageWorkspace}
                             onClick={() => handleDeleteTask(t.id, t.title)}
                             title="Delete Task"
                             className="p-1 rounded text-slate-500 hover:text-rose-400 hover:bg-rose-500/10 transition-colors cursor-pointer"
@@ -2030,6 +2245,7 @@ export const AppWorkspace: React.FC<AppWorkspaceProps> = ({ onBackToLanding }) =
                         <div className="flex items-start justify-between gap-2">
                           <div className="text-xs font-bold text-slate-300 line-through">{t.title}</div>
                           <button
+                            disabled={!canManageWorkspace}
                             onClick={() => handleDeleteTask(t.id, t.title)}
                             title="Delete Task"
                             className="p-1 rounded text-slate-500 hover:text-rose-400 hover:bg-rose-500/10 transition-colors cursor-pointer"
@@ -2054,6 +2270,7 @@ export const AppWorkspace: React.FC<AppWorkspaceProps> = ({ onBackToLanding }) =
           {activeTab === 'knowledge' && (
             <div className="h-full flex-1 flex flex-col min-h-0 animate-fadeIn">
               <AIKnowledgeView
+                key={activeWorkspace?.id}
                 activeWorkspace={activeWorkspace}
                 getToken={getToken}
                 onNavigateToMeeting={(meetingId, ts) => {
@@ -2228,12 +2445,14 @@ export const AppWorkspace: React.FC<AppWorkspaceProps> = ({ onBackToLanding }) =
           {/* TAB 6: TEAM MEMBERS */}
           {activeTab === 'team' && (
             <div className="space-y-6 animate-fadeIn">
+              {activeWorkspace && <WorkspaceAccessPanel key={activeWorkspace.id} workspace={activeWorkspace} members={members || []} getToken={getToken} onChange={async () => { await Promise.all([mutateMembers(), mutateWorkspaces()]); }} />}
               <div className="flex items-center justify-between">
                 <div>
                   <h2 className="text-2xl font-extrabold text-white">{activeWorkspace?.name || 'Workspace'} Members</h2>
                   <p className="text-xs text-slate-400 mt-0.5">Manage team access and permissions.</p>
                 </div>
                 <button
+                  disabled={!canManageWorkspace}
                   onClick={() => setInviteModalOpen(true)}
                   className="px-4 py-2 rounded-xl bg-[#8B5CF6] hover:bg-[#7c3aed] text-white text-xs font-bold cursor-pointer shadow-lg shadow-[#8B5CF6]/20"
                 >
@@ -2267,7 +2486,7 @@ export const AppWorkspace: React.FC<AppWorkspaceProps> = ({ onBackToLanding }) =
                         <span className="text-[10px] font-mono px-2.5 py-1 rounded bg-[#8B5CF6]/20 text-[#8B5CF6] font-bold uppercase">
                           {m.role}
                         </span>
-                        {m.role !== 'owner' && (
+                        {canManageWorkspace && m.role !== 'owner' && (isWorkspaceOwner || m.role !== 'admin') && (
                           <button
                             onClick={() => handleRemoveMember(m.user_id, m.name)}
                             title="Remove member from workspace"
@@ -2285,7 +2504,8 @@ export const AppWorkspace: React.FC<AppWorkspaceProps> = ({ onBackToLanding }) =
           )}
 
           {/* TAB 7: INTEGRATIONS */}
-          {activeTab === 'integrations' && (
+          {activeTab === 'integrations' && !canManageWorkspace && <p className="text-xs text-slate-400">Workspace integrations are managed by your manager.</p>}
+          {activeTab === 'integrations' && canManageWorkspace && (
             <div className="space-y-6 animate-fadeIn">
               <div>
                 <h2 className="text-2xl font-extrabold text-white">Workspace Integrations</h2>
@@ -2490,7 +2710,7 @@ export const AppWorkspace: React.FC<AppWorkspaceProps> = ({ onBackToLanding }) =
                   );
                 })()}
 
-                {/* 4. Linear Issue Tracker Card */}
+                {/* Workspace task board */}
                 <div className="p-6 rounded-2xl bg-[#111113] border border-[#27272A] space-y-4 flex flex-col justify-between">
                   <div className="space-y-3">
                     <div className="flex items-center justify-between">
@@ -2499,27 +2719,27 @@ export const AppWorkspace: React.FC<AppWorkspaceProps> = ({ onBackToLanding }) =
                           <Kanban className="w-4 h-4" />
                         </div>
                         <div>
-                          <div className="text-sm font-extrabold text-white">Linear & Jira</div>
-                          <div className="text-[11px] font-mono text-slate-400">Sprint Sync</div>
+                          <div className="text-sm font-extrabold text-white">Workspace Tasks</div>
+                          <div className="text-[11px] font-mono text-slate-400">Meeting follow-up</div>
                         </div>
                       </div>
 
                       <span className="px-2.5 py-0.5 rounded-full text-[10px] font-mono font-bold bg-[#18181b] text-slate-400 border border-[#27272A]">
-                        Active
+                        Available
                       </span>
                     </div>
 
                     <p className="text-xs text-slate-300 leading-relaxed">
-                      Sync meeting action items and assignees directly to your product engineering backlog with priority and deadline metadata.
+                      Review extracted action items, correct owners and due dates, and track progress on the workspace board.
                     </p>
                   </div>
 
                   <div className="flex items-center gap-2 pt-2 border-t border-[#27272A]">
                     <button
-                      onClick={() => showToast('Linear issue sync is active on your workspace Kanban board.')}
+                      onClick={() => setActiveTab('kanban')}
                       className="px-4 py-2 rounded-xl text-xs font-bold bg-[#18181b] hover:bg-[#27272A] text-slate-300 border border-[#27272A] transition-colors cursor-pointer"
                     >
-                      View Board Sync
+                      Open Task Board
                     </button>
                   </div>
                 </div>
@@ -2587,6 +2807,10 @@ export const AppWorkspace: React.FC<AppWorkspaceProps> = ({ onBackToLanding }) =
                     Workspace Details
                   </button>
 
+                  <button onClick={() => setSettingsTab('voice')}
+                    className={`w-full text-left px-3.5 py-2.5 rounded-xl text-xs font-bold transition-colors cursor-pointer ${settingsTab === 'voice' ? 'bg-[#8B5CF6] text-white' : 'text-slate-400 hover:text-white'}`}>
+                    Bot Voice
+                  </button>
                   <button
                     onClick={() => setSettingsTab('theme')}
                     className={`w-full text-left px-3.5 py-2.5 rounded-xl text-xs font-bold transition-colors cursor-pointer ${
@@ -2616,6 +2840,10 @@ export const AppWorkspace: React.FC<AppWorkspaceProps> = ({ onBackToLanding }) =
                         </div>
                       </div>
                     </div>
+                  )}
+
+                  {settingsTab === 'voice' && activeWorkspace && (
+                    canManageWorkspace ? <PilotVoiceSettings key={activeWorkspace.id} workspaceId={activeWorkspace.id} getToken={getToken} /> : <p className="text-xs text-slate-400">Your manager chooses the workspace bot voice.</p>
                   )}
 
                   {settingsTab === 'workspace' && (
@@ -2657,6 +2885,7 @@ export const AppWorkspace: React.FC<AppWorkspaceProps> = ({ onBackToLanding }) =
                               <div className="flex items-center gap-2 mt-1">
                                 <span className="text-white font-bold">{activeWorkspace?.name}</span>
                                 <button
+                                  disabled={!canManageWorkspace}
                                   onClick={() => {
                                     setWorkspaceRenameInput(activeWorkspace?.name || '');
                                     setEditingWorkspaceName(true);
@@ -2680,7 +2909,7 @@ export const AppWorkspace: React.FC<AppWorkspaceProps> = ({ onBackToLanding }) =
                       </div>
 
                       {/* Danger Zone: Delete Workspace */}
-                      {activeWorkspace && (
+                      {activeWorkspace && isWorkspaceOwner && (
                         <div className="pt-6 border-t border-[#27272A] space-y-3">
                           <div className="p-4 rounded-xl border border-red-500/30 bg-red-950/10 space-y-3">
                             <div className="flex items-center gap-2 text-red-400">
@@ -2736,7 +2965,7 @@ export const AppWorkspace: React.FC<AppWorkspaceProps> = ({ onBackToLanding }) =
           <div className="relative w-full max-w-md rounded-2xl bg-[#111113] border border-[#27272A] p-6 text-slate-200 space-y-4 shadow-2xl">
             <h3 className="text-lg font-bold text-white">Upload Meeting Audio</h3>
             <p className="text-xs text-slate-400">
-              Upload MP3, WAV, AAC, or M4A audio for Gemini speech diarization and action item extraction.
+              Upload meeting audio for local transcription and evidence-linked action items.
             </p>
 
             <form onSubmit={handleUploadMeeting} className="space-y-4">
@@ -2751,6 +2980,7 @@ export const AppWorkspace: React.FC<AppWorkspaceProps> = ({ onBackToLanding }) =
                 />
               </div>
 
+              <MeetingLanguageSelect value={uploadLanguage} onChange={setUploadLanguage} disabled={uploading} />
               <div className="space-y-1.5">
                 <label className="text-[11px] font-mono text-slate-400">Select Audio File</label>
                 <input
@@ -2824,6 +3054,7 @@ export const AppWorkspace: React.FC<AppWorkspaceProps> = ({ onBackToLanding }) =
                 />
               </div>
 
+              <MeetingLanguageSelect value={uploadLanguage} onChange={setUploadLanguage} disabled={isRecording || submittingRecording} />
               {/* Live Waveform & Timer Banner */}
               <div className="p-6 rounded-2xl bg-[#18181b] border border-[#27272A] text-center space-y-3">
                 <div className="text-3xl font-extrabold font-mono tracking-wider text-white">
@@ -3024,7 +3255,7 @@ export const AppWorkspace: React.FC<AppWorkspaceProps> = ({ onBackToLanding }) =
                 </div>
                 <div>
                   <h3 className="text-base font-extrabold text-white">Import Zoom Cloud Recordings</h3>
-                  <p className="text-xs text-slate-400">Select a cloud recording to pull and process with Gemini 2.0 Flash.</p>
+                  <p className="text-xs text-slate-400">Select a recording to process with your configured local models.</p>
                 </div>
               </div>
 
@@ -3130,8 +3361,8 @@ export const AppWorkspace: React.FC<AppWorkspaceProps> = ({ onBackToLanding }) =
                   onChange={(e) => setInviteRole(e.target.value as 'admin' | 'member')}
                   className="w-full bg-[#18181b] border border-[#27272A] rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-none focus:border-[#8B5CF6]"
                 >
-                  <option value="member">Member (Read & Upload)</option>
-                  <option value="admin">Admin (Full Control)</option>
+                  <option value="member">Teammate (Use knowledge & meetings)</option>
+                  {isWorkspaceOwner && <option value="admin">Manager (Manage Workspace)</option>}
                 </select>
               </div>
 
@@ -3246,9 +3477,11 @@ export const AppWorkspace: React.FC<AppWorkspaceProps> = ({ onBackToLanding }) =
       )}
 
       {/* Step C1 & C3: Live Google Meet Capture & Mandatory Legal Consent Modal */}
+      {joinWorkspaceOpen && <JoinWorkspaceModal getToken={getToken} onChange={mutateWorkspaces} onEnter={enterApprovedWorkspace} onClose={() => setJoinWorkspaceOpen(false)} />}
       <LiveMeetingModal
+        initialMeetingUrl={retryLiveMeetingUrl}
         isOpen={liveMeetModalOpen}
-        onClose={() => setLiveMeetModalOpen(false)}
+        onClose={() => { setLiveMeetModalOpen(false); setRetryLiveMeetingUrl(''); }}
         workspaceId={activeWorkspaceId || ''}
         getToken={getToken}
         onSuccess={(created) => {
@@ -3277,5 +3510,6 @@ export const AppWorkspace: React.FC<AppWorkspaceProps> = ({ onBackToLanding }) =
         </div>
       )}
     </div>
+    </WorkspaceManagerContext.Provider>
   );
 };

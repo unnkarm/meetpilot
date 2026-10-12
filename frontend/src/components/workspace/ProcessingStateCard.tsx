@@ -1,17 +1,27 @@
 import React from 'react';
-import { RefreshCw, CheckCircle2, Clock, Loader2, Sparkles } from 'lucide-react';
+import { RefreshCw, CheckCircle2, Clock, Loader2 } from 'lucide-react';
 import { MeetingStatus } from '../../types';
 
 interface ProcessingStateCardProps {
   status: MeetingStatus;
   meetingTitle: string;
+  retryAvailable?: boolean;
+  onRetry?: () => Promise<void>;
 }
 
 export const ProcessingStateCard: React.FC<ProcessingStateCardProps> = ({
   status,
   meetingTitle,
+  retryAvailable,
+  onRetry,
 }) => {
-  const isQueued = status === 'queued';
+  const stages = [
+    { label: 'Queued for worker', status: 'queued' },
+    { label: 'Transcribing audio', status: 'transcribing' },
+    { label: 'Indexing transcript', status: 'embedding' },
+    { label: 'Extracting summary, tasks and decisions', status: 'analyzing' },
+  ] as const;
+  const active = status === 'processing' ? 1 : status === 'transcribed' ? 2 : Math.max(0, stages.findIndex((stage) => stage.status === status));
 
   return (
     <div className="p-8 sm:p-10 rounded-2xl bg-[#111113] border border-[#8B5CF6]/30 shadow-2xl space-y-6 animate-fadeIn text-center">
@@ -22,49 +32,29 @@ export const ProcessingStateCard: React.FC<ProcessingStateCardProps> = ({
         </div>
 
         <h2 className="text-xl font-bold text-white tracking-tight">
-          {isQueued
-            ? `Meeting "${meetingTitle}" is Queued`
-            : `Processing & Analyzing "${meetingTitle}"`}
+          {stages[active].label}: {meetingTitle}
         </h2>
 
         <p className="text-xs text-slate-400 max-w-lg mx-auto leading-relaxed">
-          {isQueued
-            ? 'The audio file is scheduled in Celery. Automatic polling is active.'
-            : 'Speech transcription, speaker diarization, executive summarization, and vector embedding are running in the pipeline.'}
+          Your recording is safe. This page updates as each processing step finishes.
         </p>
       </div>
 
       {/* Progress Steps Indicator */}
       <div className="max-w-md mx-auto p-4 rounded-xl bg-[#18181b] border border-[#27272A] space-y-3 text-left">
-        <div className="flex items-center justify-between text-xs text-slate-300">
-          <span className="flex items-center gap-2">
-            <CheckCircle2 className="w-4 h-4 text-emerald-400" />
-            <span>Audio Ingested & Normalized</span>
-          </span>
-          <span className="text-[10px] font-mono text-emerald-400 font-bold">DONE</span>
-        </div>
-
-        <div className="flex items-center justify-between text-xs text-slate-300">
-          <span className="flex items-center gap-2">
-            {isQueued ? (
-              <Clock className="w-4 h-4 text-amber-400" />
-            ) : (
-              <Loader2 className="w-4 h-4 text-[#8B5CF6] animate-spin" />
-            )}
-            <span>Whisper Speech Transcription & Diarization</span>
-          </span>
-          <span className="text-[10px] font-mono text-amber-400 font-bold">
-            {isQueued ? 'QUEUED' : 'RUNNING'}
-          </span>
-        </div>
-
-        <div className="flex items-center justify-between text-xs text-slate-400">
-          <span className="flex items-center gap-2">
-            <Sparkles className="w-4 h-4 text-slate-600" />
-            <span>Single-Pass Executive Intelligence Extraction</span>
-          </span>
-          <span className="text-[10px] font-mono text-slate-600 font-bold">PENDING</span>
-        </div>
+        {stages.map((stage, index) => (
+          <div key={stage.status} className="flex items-center justify-between text-xs text-slate-300">
+            <span className="flex items-center gap-2">
+              {index < active ? <CheckCircle2 className="w-4 h-4 text-emerald-400" /> :
+               index === active ? <Loader2 className="w-4 h-4 text-[#8B5CF6] animate-spin" /> :
+               <Clock className="w-4 h-4 text-slate-600" />}
+              <span>{stage.label}</span>
+            </span>
+            <span className="text-[10px] font-mono text-slate-400 font-bold">
+              {index < active ? 'DONE' : index === active ? 'RUNNING' : 'PENDING'}
+            </span>
+          </div>
+        ))}
       </div>
 
       {/* Live Polling Status Tag */}
@@ -72,6 +62,12 @@ export const ProcessingStateCard: React.FC<ProcessingStateCardProps> = ({
         <Loader2 className="w-3.5 h-3.5 animate-spin" />
         <span>Polling pipeline status every 3s...</span>
       </div>
+      {retryAvailable && onRetry && (
+        <div className="space-y-2">
+          <p className="text-xs text-amber-300">This stage has taken longer than expected.</p>
+          <button type="button" onClick={onRetry} className="px-4 py-2 rounded-lg bg-[#8B5CF6] text-white text-xs font-bold">Retry processing</button>
+        </div>
+      )}
     </div>
   );
 };

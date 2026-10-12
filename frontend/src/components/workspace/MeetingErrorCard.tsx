@@ -7,6 +7,8 @@ interface MeetingErrorCardProps {
   failureReason?: string | null;
   onRetry: () => Promise<void>;
   onOpenUpload: () => void;
+  isLive?: boolean;
+  onNewLiveMeeting?: () => void;
   onDelete: () => void;
 }
 
@@ -15,6 +17,8 @@ export const MeetingErrorCard: React.FC<MeetingErrorCardProps> = ({
   failureReason,
   onRetry,
   onOpenUpload,
+  isLive,
+  onNewLiveMeeting,
   onDelete,
 }) => {
   const [isRetrying, setIsRetrying] = useState(false);
@@ -42,7 +46,7 @@ export const MeetingErrorCard: React.FC<MeetingErrorCardProps> = ({
         </div>
 
         <h2 className="text-xl font-bold text-white tracking-tight">
-          Meeting Processing Encountered an Issue
+          {isLive ? 'Meeting Bot Could Not Join' : 'Meeting Processing Encountered an Issue'}
         </h2>
 
         <p className="text-xs text-rose-300 max-w-md mx-auto leading-relaxed">
@@ -71,7 +75,7 @@ export const MeetingErrorCard: React.FC<MeetingErrorCardProps> = ({
 
       {/* Actions */}
       <div className="flex flex-wrap justify-center items-center gap-3 pt-2">
-        <button
+        {!isLive && <button
           onClick={handleRetryClick}
           disabled={isRetrying}
           className="px-5 py-2.5 rounded-xl bg-[#8B5CF6] hover:bg-[#7c3aed] disabled:opacity-40 text-white text-xs font-bold shadow-lg shadow-[#8B5CF6]/25 flex items-center gap-2 cursor-pointer transition-all active:scale-95"
@@ -82,15 +86,20 @@ export const MeetingErrorCard: React.FC<MeetingErrorCardProps> = ({
             <RefreshCw className="w-4 h-4" />
           )}
           <span>Retry Processing</span>
-        </button>
+        </button>}
 
-        <button
+        {isLive && onNewLiveMeeting && <button
+          onClick={onNewLiveMeeting}
+          className="px-5 py-2.5 rounded-xl bg-[#8B5CF6] hover:bg-[#7c3aed] text-white text-xs font-bold shadow-lg shadow-[#8B5CF6]/25"
+        >Start Bot Again</button>}
+
+        {!isLive && <button
           onClick={onOpenUpload}
           className="px-4 py-2.5 rounded-xl bg-[#18181b] hover:bg-[#27272A] border border-[#27272A] text-slate-300 text-xs font-bold transition-colors cursor-pointer flex items-center gap-1.5"
         >
           <Upload className="w-3.5 h-3.5 text-[#8B5CF6]" />
           <span>Re-upload Audio</span>
-        </button>
+        </button>}
 
         <button
           onClick={onDelete}

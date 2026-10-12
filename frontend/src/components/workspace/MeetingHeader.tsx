@@ -18,6 +18,7 @@ import { ExportDropdown } from './ExportDropdown';
 import { MeetingSpeakerStats } from '../../utils/speakerUtils';
 
 interface MeetingHeaderProps {
+  canManage?: boolean;
   meeting: ApiMeetingDetail;
   allMeetings: ApiMeetingListItem[];
   speakerStats: MeetingSpeakerStats;
@@ -47,6 +48,22 @@ const STATUS_CONFIG: Record<
     border: 'border-amber-500/30',
     icon: <Loader2 className="w-3.5 h-3.5 animate-spin" />,
   },
+  transcribing: {
+    label: 'Transcribing', bg: 'bg-purple-500/10', text: 'text-purple-400',
+    border: 'border-purple-500/30', icon: <Loader2 className="w-3.5 h-3.5 animate-spin" />,
+  },
+  transcribed: {
+    label: 'Transcript ready', bg: 'bg-purple-500/10', text: 'text-purple-400',
+    border: 'border-purple-500/30', icon: <Loader2 className="w-3.5 h-3.5 animate-spin" />,
+  },
+  embedding: {
+    label: 'Indexing', bg: 'bg-purple-500/10', text: 'text-purple-400',
+    border: 'border-purple-500/30', icon: <Loader2 className="w-3.5 h-3.5 animate-spin" />,
+  },
+  analyzing: {
+    label: 'Analyzing', bg: 'bg-purple-500/10', text: 'text-purple-400',
+    border: 'border-purple-500/30', icon: <Loader2 className="w-3.5 h-3.5 animate-spin" />,
+  },
   queued: {
     label: 'Queued',
     bg: 'bg-blue-500/10',
@@ -71,6 +88,7 @@ const STATUS_CONFIG: Record<
 };
 
 export const MeetingHeader: React.FC<MeetingHeaderProps> = ({
+  canManage = false,
   meeting,
   allMeetings,
   speakerStats,
@@ -156,6 +174,7 @@ export const MeetingHeader: React.FC<MeetingHeaderProps> = ({
                   {meeting.title}
                 </h1>
                 <button
+                  disabled={!canManage}
                   onClick={() => {
                     setTitleInput(meeting.title);
                     setIsEditingTitle(true);
@@ -238,6 +257,7 @@ export const MeetingHeader: React.FC<MeetingHeaderProps> = ({
 
           {/* Delete Meeting */}
           <button
+            disabled={!canManage}
             onClick={() => onDeleteMeeting(meeting.id, meeting.title)}
             title={`Delete ${meeting.title}`}
             className="p-2 rounded-xl bg-[#18181b] hover:bg-rose-500/20 text-slate-400 hover:text-rose-400 border border-[#27272A] transition-colors cursor-pointer"
