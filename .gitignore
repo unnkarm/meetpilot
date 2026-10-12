@@ -123,9 +123,11 @@ celerybeat.pid
 # Local upload / processed audio & transcript storage
 storage/*
 backend/storage/*
+backend/bot_auth/*
+!backend/bot_auth/.gitkeep
 !backend/storage/.gitkeep
 !storage/.gitkeep
-
+scripts/commit_schedule/
 # ------------------------------------------------------------------------------
 # Logs & Temporary Files
 # ------------------------------------------------------------------------------
@@ -134,5 +136,15 @@ logs/
 *.tmp
 *.bak
 scratch/
-vexa/
 docs/
+!docs/
+docs/*
+!docs/Multilingual.md
+!docs/Workspace_Access_Audit.md
+!docs/SaaS_Deployment_Scaling_GoToMarket.md
+!docs/Feature_Roadmap.md
+!docs/Cloud_AI.md
+!docs/Review_Tools.md
+
+# External upstream reference checkouts
+/vexa/

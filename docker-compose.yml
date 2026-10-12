@@ -32,11 +32,14 @@ services:
     restart: unless-stopped
     env_file:
       - ./backend/.env
+      - ./backend/.env.vexa
+    command: sh -c "python -m app.database.bootstrap && python -m alembic upgrade head && exec uvicorn app.main:app --host 0.0.0.0 --port 8000"
     environment:
       DATABASE_URL: postgresql+psycopg2://meetpilot:meetpilot@postgres:5432/meetpilot
       REDIS_URL: redis://redis:6379/0
       CELERY_BROKER_URL: redis://redis:6379/0
       CELERY_RESULT_BACKEND: redis://redis:6379/1
+      OLLAMA_URL: ${OLLAMA_URL:-http://ollama:11434}
     ports:
       - "8000:8000"
     volumes:
@@ -49,18 +52,27 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      ollama:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
 
   celery_worker:
-    build: ./backend
+    image: meetpilot-backend
     restart: unless-stopped
     command: celery -A app.core.celery_app.celery_app worker --loglevel=info
     env_file:
       - ./backend/.env
+      - ./backend/.env.vexa
     environment:
       DATABASE_URL: postgresql+psycopg2://meetpilot:meetpilot@postgres:5432/meetpilot
       REDIS_URL: redis://redis:6379/0
       CELERY_BROKER_URL: redis://redis:6379/0
       CELERY_RESULT_BACKEND: redis://redis:6379/1
+      OLLAMA_URL: ${OLLAMA_URL:-http://ollama:11434}
       C_FORCE_ROOT: "true"
     volumes:
       - audio_storage:/app/storage
@@ -70,10 +82,45 @@ services:
 
 
     depends_on:
-      postgres:
+      backend:
         condition: service_healthy
-      redis:
+
+  meeting_bot:
+    image: meetpilot-backend
+    restart: unless-stopped
+    init: true
+    command: celery -A app.core.celery_app.celery_app worker -Q meeting_bot --concurrency=1 --loglevel=info
+    shm_size: "1gb"
+    env_file:
+      - ./backend/.env
+      - ./backend/.env.vexa
+    environment:
+      DATABASE_URL: postgresql+psycopg2://meetpilot:meetpilot@postgres:5432/meetpilot
+      REDIS_URL: redis://redis:6379/0
+      CELERY_BROKER_URL: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/1
+      OLLAMA_URL: ${OLLAMA_URL:-http://ollama:11434}
+      C_FORCE_ROOT: "true"
+      MEETPILOT_VEXA_BRIDGE_WORKER: "true"
+    volumes:
+      - audio_storage:/app/storage
+      - ./backend/bot_auth:/app/bot_auth:ro
+      - bot_profiles:/app/bot_profiles
+      - ./backend/scripts:/app/scripts:ro
+      - ./backend/app:/app/app
+      - ./backend/alembic:/app/alembic
+      - ./backend/alembic.ini:/app/alembic.ini
+    depends_on:
+      backend:
         condition: service_healthy
+      vexa:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "celery -A app.core.celery_app.celery_app inspect ping -d celery@$$HOSTNAME --timeout=4 | grep -q pong"]
+      interval: 15s
+      timeout: 5s
+      retries: 6
+      start_period: 30s
 
 
   # Vite/React frontend wired to the real FastAPI backend via SWR and Clerk JWT authentication.
@@ -89,6 +136,129 @@ services:
     depends_on:
       - backend
 
+  ollama:
+    image: ollama/ollama:latest
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_models:/root/.ollama
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+  vexa_postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    env_file: ./backend/.env.vexa
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_DB: vexa
+    volumes:
+      - vexa_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "postgres", "-d", "vexa"]
+      interval: 5s
+      timeout: 3s
+      retries: 15
+
+  vexa_redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    env_file: ./backend/.env.vexa
+    command: ["sh", "-c", "exec redis-server --appendonly yes --requirepass \"$$VEXA_REDIS_PASSWORD\""]
+    volumes:
+      - vexa_redis_data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "REDISCLI_AUTH=$$VEXA_REDIS_PASSWORD redis-cli ping | grep -q PONG"]
+      interval: 5s
+      timeout: 3s
+      retries: 15
+
+  vexa-storage:
+    image: versity/versitygw:v1.8.0@sha256:30292fc2eeacc67a36993b01f7a7a5e3361a19cced0e80c1d71cfa2a4b0a2499
+    restart: unless-stopped
+    env_file: ./backend/.env.vexa
+    entrypoint: /bin/sh
+    command: ["-c", "mkdir -p /srv/vexa-storage/data /srv/vexa-storage/iam && exec versitygw --port :9000 --health /health --iam-dir /srv/vexa-storage/iam --quiet posix /srv/vexa-storage/data"]
+    volumes:
+      - vexa_storage_data:/srv/vexa-storage
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:9000/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 15
+
+  vexa-storage-init:
+    image: versity/versitygw:v1.8.0@sha256:30292fc2eeacc67a36993b01f7a7a5e3361a19cced0e80c1d71cfa2a4b0a2499
+    env_file: ./backend/.env.vexa
+    entrypoint: /bin/sh
+    command:
+      - -c
+      - |
+        export ADMIN_ACCESS_KEY="$$ROOT_ACCESS_KEY" ADMIN_SECRET_KEY="$$ROOT_SECRET_KEY"
+        output=$$(versitygw admin --endpoint-url http://vexa-storage:9000 create-bucket --bucket vexa --owner "$$ROOT_ACCESS_KEY" 2>&1) || {
+          echo "$$output" | grep -q BucketAlreadyOwnedByYou || { echo "$$output"; exit 1; }
+        }
+        echo "Vexa recording bucket is ready"
+    depends_on:
+      vexa-storage:
+        condition: service_healthy
+
+  # Official Vexa Lite: Chromium, Xvfb, PulseAudio, gateway and bot runtime.
+  vexa:
+    image: vexaai/vexa-lite:v012@sha256:945628e54d843cf6286a823ca8e226f2b3c48eb948ad2f895e64eb867b7a0d55
+    restart: unless-stopped
+    init: true
+    shm_size: "2gb"
+    env_file: ./backend/.env.vexa
+    command: ["supervisord", "-c", "/meetpilot/supervisord.conf"]
+    environment:
+      DB_HOST: vexa_postgres
+      DB_PORT: "5432"
+      DB_USER: postgres
+      DB_NAME: vexa
+      DEFAULT_BOT_NAME: MeetPilot AI Bot
+      MINIO_ENDPOINT: vexa-storage:9000
+      MINIO_BUCKET: vexa
+      MINIO_SECURE: "false"
+      BOT_COMMAND: /opt/venvs/meeting/bin/python /meetpilot/bot_launch.py
+      TRANSCRIPTION_MODEL: whisper-1
+      VEXA_PUBLIC_API_URL: http://localhost:18056
+      TERMINAL_PUBLIC_URL: http://localhost:18057
+    ports:
+      - "127.0.0.1:18056:8056"
+      - "127.0.0.1:18057:3001"
+      - "127.0.0.1:6080:6080"
+    volumes:
+      - ./deploy/vexa:/meetpilot:ro
+      - ./backend/.env.vexa:/run/meetpilot-vexa.env:ro
+      - vexa_workspaces:/workspaces
+    depends_on:
+      backend:
+        condition: service_healthy
+      vexa_postgres:
+        condition: service_healthy
+      vexa_redis:
+        condition: service_healthy
+      vexa-storage:
+        condition: service_healthy
+      vexa-storage-init:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8056/health', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 60s
+
 volumes:
+  vexa_postgres_data:
+  vexa_redis_data:
+  vexa_storage_data:
+  vexa_workspaces:
   postgres_data:
   audio_storage:
+  ollama_models:
+  bot_profiles:
