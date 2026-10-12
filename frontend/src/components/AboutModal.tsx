@@ -96,16 +96,16 @@ export const AboutModal: React.FC<AboutModalProps> = ({ isOpen, onClose, onOpenG
             <div className="flex items-start gap-3">
               <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
               <div>
-                <span className="font-bold text-white">Q3 2026: Whisper HD Real-time WebRTC Streaming</span>
-                <p className="text-slate-400">Live sub-second transcript streaming with auto speaker diarization.</p>
+                <span className="font-bold text-white">Local meeting intelligence beta</span>
+                <p className="text-slate-400">Asynchronous transcription, source-linked insights and workspace questions.</p>
               </div>
             </div>
 
             <div className="flex items-start gap-3">
               <CheckCircle2 className="w-4 h-4 text-[#8B5CF6] shrink-0 mt-0.5" />
               <div>
-                <span className="font-bold text-white">Q4 2026: Deep Bidirectional Linear & Jira Sync</span>
-                <p className="text-slate-400">Two-way ticket state updates directly from AI action item completions.</p>
+                <span className="font-bold text-white">Next: stronger speaker recognition</span>
+                <p className="text-slate-400">Improve local diarization and review AI accuracy on longer recordings.</p>
               </div>
             </div>
 

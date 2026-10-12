@@ -27,8 +27,8 @@ export const PrivacyModal: React.FC<PrivacyModalProps> = ({ isOpen, onClose }) =
             <ShieldCheck className="w-6 h-6" />
           </div>
           <div>
-            <h3 className="text-xl font-extrabold text-white">Privacy & Security Guarantees</h3>
-            <p className="text-xs text-slate-400">MeetPilot AI Data Protection Architecture</p>
+            <h3 className="text-xl font-extrabold text-white">Beta Data Handling</h3>
+            <p className="text-xs text-slate-400">Workspace access and AI processing</p>
           </div>
         </div>
 
@@ -37,9 +37,9 @@ export const PrivacyModal: React.FC<PrivacyModalProps> = ({ isOpen, onClose }) =
           <div className="p-4 rounded-xl bg-white/[0.03] border border-white/10 flex items-start gap-3">
             <EyeOff className="w-5 h-5 text-indigo-400 shrink-0 mt-0.5" />
             <div>
-              <h4 className="font-bold text-white text-sm mb-1">Zero AI Model Training</h4>
+              <h4 className="font-bold text-white text-sm mb-1">AI Processing</h4>
               <p className="leading-relaxed text-slate-400">
-                Your meeting audio and transcripts are NEVER used to train foundational AI models. Your data remains strictly isolated to your private tenant.
+                MeetPilot processes meeting data on the server running the service. When cloud AI is enabled, transcript context is sent to the configured AI provider. Using the web dashboard does not mean processing stays on your device.
               </p>
             </div>
           </div>
@@ -47,9 +47,9 @@ export const PrivacyModal: React.FC<PrivacyModalProps> = ({ isOpen, onClose }) =
           <div className="p-4 rounded-xl bg-white/[0.03] border border-white/10 flex items-start gap-3">
             <Lock className="w-5 h-5 text-emerald-400 shrink-0 mt-0.5" />
             <div>
-              <h4 className="font-bold text-white text-sm mb-1">256-Bit AES Encryption</h4>
+              <h4 className="font-bold text-white text-sm mb-1">Stored Recordings</h4>
               <p className="leading-relaxed text-slate-400">
-                All meeting assets are encrypted at rest using AES-256 and in transit via TLS 1.3 standards.
+                MeetPilot stores recordings on the server running the service and checks workspace access before playback. This beta does not yet provide configurable retention or application-level file encryption.
               </p>
             </div>
           </div>
@@ -57,16 +57,16 @@ export const PrivacyModal: React.FC<PrivacyModalProps> = ({ isOpen, onClose }) =
           <div className="p-4 rounded-xl bg-white/[0.03] border border-white/10 flex items-start gap-3">
             <Server className="w-5 h-5 text-purple-400 shrink-0 mt-0.5" />
             <div>
-              <h4 className="font-bold text-white text-sm mb-1">SOC2 Type II & GDPR Ready</h4>
+              <h4 className="font-bold text-white text-sm mb-1">Workspace Access</h4>
               <p className="leading-relaxed text-slate-400">
-                Built with strict compliance controls, automatic data retention policies, and instant data deletion workflows.
+                Clerk verifies sign-in and the API checks workspace membership before serving meetings, documents and audio. This beta has no compliance certification.
               </p>
             </div>
           </div>
         </div>
 
         <div className="pt-4 border-t border-white/10 flex items-center justify-between text-xs text-slate-400">
-          <span>Security Audit Report v2026.1</span>
+          <span>Current beta behavior</span>
           <button onClick={onClose} className="px-4 py-2 rounded-xl bg-indigo-600 text-white font-semibold hover:bg-indigo-500 transition-colors">
             I Understand
           </button>

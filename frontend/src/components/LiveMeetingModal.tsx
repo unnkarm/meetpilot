@@ -18,6 +18,7 @@ import {
 } from 'lucide-react';
 import { startLiveMeeting } from '../services/api';
 import { ApiMeetingDetail } from '../types';
+import { MeetingLanguageSelect } from './workspace/MeetingLanguageDisplay';
 
 interface LiveMeetingModalProps {
   isOpen: boolean;
@@ -25,6 +26,7 @@ interface LiveMeetingModalProps {
   workspaceId: string;
   getToken?: () => Promise<string | null>;
   onSuccess: (meeting: ApiMeetingDetail) => void;
+  initialMeetingUrl?: string;
 }
 
 export const LiveMeetingModal: React.FC<LiveMeetingModalProps> = ({
@@ -33,9 +35,11 @@ export const LiveMeetingModal: React.FC<LiveMeetingModalProps> = ({
   workspaceId,
   getToken,
   onSuccess,
+  initialMeetingUrl,
 }) => {
   const [meetingUrl, setMeetingUrl] = useState('');
   const [meetingTitle, setMeetingTitle] = useState('');
+  const [meetingLanguage, setMeetingLanguage] = useState('en');
   const [hasLegalConsent, setHasLegalConsent] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
@@ -48,18 +52,26 @@ export const LiveMeetingModal: React.FC<LiveMeetingModalProps> = ({
   useEffect(() => {
     if (!isOpen) {
       setErrorMsg(null);
+    } else if (initialMeetingUrl) {
+      setMeetingUrl(initialMeetingUrl);
     }
-  }, [isOpen]);
+  }, [isOpen, initialMeetingUrl]);
 
   if (!isOpen) return null;
 
-  // Validate Google Meet URL/code format
+  // Match the same meeting hosts accepted by the backend.
   const cleanUrl = meetingUrl.trim();
-  const isMeetCodeOrUrl =
-    cleanUrl.length > 0 &&
-    (cleanUrl.includes('meet.google.com/') ||
-      /^[a-z]{3}-[a-z]{4}-[a-z]{3}$/i.test(cleanUrl) ||
-      cleanUrl.length >= 8);
+  const isMeetCode = /^[a-z]{3}-[a-z]{4}-[a-z]{3}$/i.test(cleanUrl);
+  const isMeetCodeOrUrl = isMeetCode || (() => {
+    try {
+      const url = new URL(cleanUrl);
+      return url.protocol === 'https:' && Boolean(url.pathname && url.pathname !== '/') &&
+        (url.hostname === 'meet.google.com' || url.hostname === 'teams.microsoft.com' ||
+          url.hostname === 'teams.live.com' || url.hostname === 'zoom.us' || url.hostname.endsWith('.zoom.us'));
+    } catch {
+      return false;
+    }
+  })();
 
   const isFormValid = hasLegalConsent && isMeetCodeOrUrl && !isLoading;
 
@@ -88,12 +100,14 @@ export const LiveMeetingModal: React.FC<LiveMeetingModalProps> = ({
     try {
       const res = await startLiveMeeting(
         workspaceId,
-        cleanUrl,
+        isMeetCode ? `https://meet.google.com/${cleanUrl}` : cleanUrl,
         meetingTitle.trim() || undefined,
-        getToken
+        getToken,
+        meetingLanguage
       );
       setMeetingUrl('');
       setMeetingTitle('');
+      setMeetingLanguage('en');
       setHasLegalConsent(false);
       onSuccess(res);
       onClose();
@@ -118,7 +132,7 @@ export const LiveMeetingModal: React.FC<LiveMeetingModalProps> = ({
       <div className="absolute w-[500px] h-[500px] rounded-full bg-gradient-to-tr from-indigo-600/15 via-purple-600/10 to-emerald-500/10 blur-3xl pointer-events-none -z-10" />
 
       {/* Modal Container */}
-      <div className="relative w-full max-w-3xl overflow-hidden rounded-3xl bg-[#0d0f17]/95 border border-white/10 shadow-[0_25px_70px_rgba(0,0,0,0.8),0_0_50px_rgba(99,102,241,0.12)] text-slate-100 flex flex-col">
+      <div className="relative w-full max-w-3xl max-h-[90vh] overflow-y-auto rounded-3xl bg-[#0d0f17]/95 border border-white/10 shadow-[0_25px_70px_rgba(0,0,0,0.8),0_0_50px_rgba(99,102,241,0.12)] text-slate-100 flex flex-col">
         {/* Sleek top glowing border line */}
         <div className="h-1 w-full bg-gradient-to-r from-emerald-400 via-indigo-500 to-purple-500" />
 
@@ -138,12 +152,8 @@ export const LiveMeetingModal: React.FC<LiveMeetingModalProps> = ({
             <div>
               <div className="flex items-center gap-2.5 flex-wrap">
                 <h2 className="text-xl font-bold tracking-tight text-white">
-                  Join Live Google Meet
+                  Join Live Meeting
                 </h2>
-                {/* <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 text-[11px] font-semibold text-emerald-400 bg-emerald-950/60 border border-emerald-500/30 rounded-full shadow-sm">
-                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-                  Self-Hosted Vexa Bot
-                </span> */}
               </div>
               <p className="text-xs text-slate-400 mt-1 leading-relaxed">
                 Dispatch an autonomous AI companion into your meeting for live transcription & notes.
@@ -175,11 +185,11 @@ export const LiveMeetingModal: React.FC<LiveMeetingModalProps> = ({
             </div>
           )}
 
-          {/* Google Meet URL Field */}
+          {/* Meeting URL Field */}
           <div className="space-y-2">
             <div className="flex items-center justify-between">
               <label className="text-xs font-semibold uppercase tracking-wider text-slate-300 flex items-center gap-1.5">
-                <span>Google Meet Link or Code</span>
+                <span>Google Meet, Teams, or Zoom Link</span>
                 <span className="text-rose-400">*</span>
               </label>
 
@@ -211,7 +221,7 @@ export const LiveMeetingModal: React.FC<LiveMeetingModalProps> = ({
                 type="text"
                 value={meetingUrl}
                 onChange={(e) => setMeetingUrl(e.target.value)}
-                placeholder="Meet URL"
+                placeholder="https://meet.google.com/abc-defg-hij"
                 required
                 className={`w-full pl-10 pr-24 py-3 text-sm text-white bg-black/40 border rounded-2xl placeholder-slate-500 focus:outline-none transition-all font-mono ${meetingUrl.trim().length > 0 && isMeetCodeOrUrl
                     ? 'border-emerald-500/50 focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-400'
@@ -232,12 +242,15 @@ export const LiveMeetingModal: React.FC<LiveMeetingModalProps> = ({
                     </span>
                   )
                 ) : (
-                  <span className="text-[11px] text-slate-500 font-sans">Google Meet</span>
+                  <span className="text-[11px] text-slate-500 font-sans">Meeting link</span>
                 )}
               </div>
             </div>
             <p className="text-[11px] text-slate-400 flex items-center gap-1">
-              Supports full URL (<span className="text-slate-300 font-mono">meet.google.com/xxx-xxxx-xxx</span>) or 10-char room code.
+              Supports Google Meet links or codes, plus full Teams and Zoom meeting links.
+            </p>
+            <p className="text-[11px] text-amber-300/90">
+              For restricted Google Meets, allow guests to ask to join in Host controls. Admit “MeetPilot AI Bot” when prompted.
             </p>
           </div>
 
@@ -283,6 +296,10 @@ export const LiveMeetingModal: React.FC<LiveMeetingModalProps> = ({
           </div>
 
           {/* REDESIGNED: Legal Consent & Recording Compliance Card */}
+          <MeetingLanguageSelect value={meetingLanguage} onChange={setMeetingLanguage} disabled={isLoading} />
+          {['hi', 'bn'].includes(meetingLanguage) && <p className="text-xs text-slate-400">
+            {meetingLanguage === 'hi' ? 'Hinglish' : 'Benglish'} display uses Roman letters. You can switch to the original script in the meeting view.
+          </p>}
           <div className="relative rounded-2xl bg-gradient-to-b from-amber-500/[0.07] to-indigo-500/[0.04] border border-amber-500/25 p-4 space-y-3.5 overflow-hidden">
             {/* Subtle background shield watermark */}
             <ShieldCheck className="absolute -right-4 -bottom-4 w-32 h-32 text-amber-500/[0.04] pointer-events-none" />
@@ -302,7 +319,7 @@ export const LiveMeetingModal: React.FC<LiveMeetingModalProps> = ({
                   </span>
                 </div>
                 <p className="text-xs text-amber-200/80 leading-relaxed">
-                  You are dispatching an autonomous AI bot into an active call. Recording or transcribing meetings with the consent of all attendees is strictly prohibited by law in many jurisdictions.
+                  You are dispatching an autonomous AI bot into an active call. Inform participants and obtain consent where required before recording or transcribing.
                 </p>
               </div>
             </div>
@@ -339,7 +356,7 @@ export const LiveMeetingModal: React.FC<LiveMeetingModalProps> = ({
                   I confirm all meeting participants have been informed and explicitly consented to AI recording & transcription.
                 </span>
                 <p className="text-[11px] text-slate-400 leading-tight">
-                  Bot identity will be announced upon joining the Google Meet room.
+                  The bot appears in the meeting as MeetPilot AI Bot.
                 </p>
               </div>
             </label>

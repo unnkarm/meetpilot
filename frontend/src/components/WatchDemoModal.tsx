@@ -31,7 +31,7 @@ export const WatchDemoModal: React.FC<WatchDemoModalProps> = ({ isOpen, onClose 
           </div>
           <div>
             <h3 className="text-lg font-bold text-white">MeetPilot AI Walkthrough</h3>
-            <p className="text-xs text-slate-400">Interactive 90-second product demonstration</p>
+            <p className="text-xs text-slate-400">Illustrative preview with sample content</p>
           </div>
         </div>
 
@@ -42,7 +42,7 @@ export const WatchDemoModal: React.FC<WatchDemoModalProps> = ({ isOpen, onClose 
           <div className="flex items-center justify-between text-xs">
             <span className="px-2.5 py-1 rounded bg-indigo-500/20 text-indigo-300 font-mono flex items-center gap-1.5">
               <Sparkles className="w-3.5 h-3.5 text-indigo-400" />
-              <span>AI Processing Live</span>
+              <span>Sample Workflow</span>
             </span>
 
             <div className="flex items-center gap-2">
@@ -76,7 +76,7 @@ export const WatchDemoModal: React.FC<WatchDemoModalProps> = ({ isOpen, onClose 
                   "We decided to deprecate custom JWTs and use OAuth 2.1 PKCE standards for security hardening."
                 </p>
                 <div className="text-[11px] text-emerald-400 font-semibold flex items-center justify-center gap-1">
-                  <CheckCircle2 className="w-3.5 h-3.5" /> 99.8% Speaker Confidence
+                  <CheckCircle2 className="w-3.5 h-3.5" /> Example transcript segment
                 </div>
               </div>
             )}

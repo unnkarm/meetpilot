@@ -17,14 +17,14 @@ export const FeaturesModal: React.FC<FeaturesModalProps> = ({ isOpen, onClose, o
       id: 'transcription',
       title: 'AI Transcription',
       icon: Mic,
-      tag: '99.2% Accuracy',
+      tag: 'Local ASR',
       color: 'text-indigo-400 bg-indigo-500/10 border-indigo-500/20',
-      description: 'Powered by Whisper HD, our transcription engine converts raw meeting audio into crystal-clear text with automatic speaker diarization and background noise elimination.',
+      description: 'Local faster-whisper turns uploaded audio into timestamped transcript segments. The default local setup labels unknown speakers conservatively.',
       bullets: [
-        'Multi-speaker identification with custom avatar tags',
-        'Word-level timestamps for pinpoint navigation',
-        'Noise cancellation filtering out keyboard clatter & crosstalk',
-        'Multi-language transcription supporting 32+ global languages'
+        'Real speech transcription rather than placeholder text',
+        'Timestamped segments for audio navigation',
+        'Chunked processing for longer recordings',
+        'Review speaker identity before relying on it'
       ],
       previewSnippet: {
         speaker: 'Sarah Chen (Lead Architect)',
@@ -36,18 +36,18 @@ export const FeaturesModal: React.FC<FeaturesModalProps> = ({ isOpen, onClose, o
       id: 'summaries',
       title: 'Smart Summaries',
       icon: FileText,
-      tag: '30-Sec Read',
+      tag: 'Structured',
       color: 'text-purple-400 bg-purple-500/10 border-purple-500/20',
-      description: 'Condenses 60-minute meetings into structured 30-second executive summaries highlighting critical decisions, key arguments, and technical consensus.',
+      description: 'Builds a concise overview, takeaways and next steps from the transcript with a configurable local model.',
       bullets: [
-        'Executive overview paragraphs generated in real-time',
-        'Key takeaways categorized by topic & priority',
-        'Instant Markdown & PDF export for Notion & Confluence',
-        'Custom summary templates tailored to Engineering, Product, or Sales'
+        'Executive overview after background processing',
+        'Key takeaways and next steps',
+        'Editable summary content',
+        'Model and prompt metadata stored with the result'
       ],
       previewSnippet: {
         speaker: 'AI Summary Engine',
-        time: '30s Read',
+        time: 'Example',
         quote: 'Key Decision: Shift authentication architecture to OAuth 2.1 PKCE with Redis token blacklist caching.'
       }
     },
@@ -57,16 +57,16 @@ export const FeaturesModal: React.FC<FeaturesModalProps> = ({ isOpen, onClose, o
       icon: CheckSquare,
       tag: 'Auto-Parsed',
       color: 'text-emerald-400 bg-emerald-500/10 border-emerald-500/20',
-      description: 'Automatically detects task commitments in spoken language, assigns them to team members, sets realistic deadlines, and syncs directly to Linear and Jira.',
+      description: 'Extracts proposed tasks from speech with source timestamps. Owners are linked only when they match workspace members; users can correct every task.',
       bullets: [
         'Spoken intent parsing ("I will take ownership of...")',
-        'Assignee mapping via voice signature & name matching',
+        'Conservative workspace member matching',
         'Priority tagging (High, Medium, Low)',
-        'Direct 1-click sync to Linear, Jira, and Asana'
+        'Editable title, owner, date, priority and status'
       ],
       previewSnippet: {
         speaker: 'Task Auto-Detector',
-        time: 'Synced to Linear',
+        time: 'Example',
         quote: 'Task: "Complete OAuth 2.1 authentication flow" -> Assigned to Sarah Chen (Due Friday)'
       }
     },
@@ -76,12 +76,12 @@ export const FeaturesModal: React.FC<FeaturesModalProps> = ({ isOpen, onClose, o
       icon: MessageSquare,
       tag: 'Context Aware',
       color: 'text-sky-400 bg-sky-500/10 border-sky-500/20',
-      description: 'Ask any question about current or past meetings. Get instant answers with cited audio timestamps so you can verify the exact spoken quote.',
+      description: 'Ask questions about meeting and workspace knowledge. Answers include retrieved source references for inspection.',
       bullets: [
         'Ask "What did Alex say about the roadmap deadline?"',
         'Cited timestamp jump links (@18:24)',
-        'Multi-turn conversational follow-ups',
-        'No halluncinations — answers strictly grounded in audio transcript'
+        'Meeting and workspace question scopes',
+        'Explicit insufficient-evidence responses'
       ],
       previewSnippet: {
         speaker: 'MeetPilot Assistant',
@@ -93,18 +93,18 @@ export const FeaturesModal: React.FC<FeaturesModalProps> = ({ isOpen, onClose, o
       id: 'semantic-search',
       title: 'Semantic Search',
       icon: Search,
-      tag: 'pgvector <10ms',
+      tag: 'pgvector',
       color: 'text-amber-400 bg-amber-500/10 border-amber-500/20',
-      description: 'Search across thousands of hours of historical team meetings using natural language. Finds exact topics even if exact keywords were not used.',
+      description: 'Search workspace transcripts and documents with local embeddings and keyword matching.',
       bullets: [
-        'PostgreSQL pgvector hybrid BM25 + dense embedding index',
+        'PostgreSQL pgvector and keyword matching',
         'Cross-meeting querying across all workspace archives',
-        'Filter by date, speaker, topic tag, or project folder',
-        'Sub-10ms response time at scale'
+        'Workspace membership enforced by the API',
+        'Source snippets for inspection'
       ],
       previewSnippet: {
         speaker: 'Vector Index',
-        time: '4ms latency',
+        time: 'Example',
         quote: 'Found 14 relevant discussion moments regarding "OAuth authentication security".'
       }
     },
@@ -112,14 +112,14 @@ export const FeaturesModal: React.FC<FeaturesModalProps> = ({ isOpen, onClose, o
       id: 'team-workspace',
       title: 'Team Workspace',
       icon: Users,
-      tag: 'SOC2 Encrypted',
+      tag: 'Workspace scoped',
       color: 'text-rose-400 bg-rose-500/10 border-rose-500/20',
-      description: 'Collaborate with your entire company. Share meeting notes, assign cross-team action items, and manage granular workspace access permissions.',
+      description: 'Share meetings and tasks with workspace members. The API checks membership before serving workspace data.',
       bullets: [
         'Granular role permissions (Admin, Editor, Viewer)',
-        'Project-based meeting tag folders',
-        'Encrypted team meeting archives',
-        'Activity notifications & Slack digest webhooks'
+        'Workspace meeting and task lists',
+        'Local meeting audio storage',
+        'In-app meeting notifications'
       ],
       previewSnippet: {
         speaker: 'Acme Workspace',
@@ -131,19 +131,19 @@ export const FeaturesModal: React.FC<FeaturesModalProps> = ({ isOpen, onClose, o
       id: 'meeting-history',
       title: 'Meeting History',
       icon: History,
-      tag: 'Permanent Memory',
+      tag: 'Searchable Memory',
       color: 'text-teal-400 bg-teal-500/10 border-teal-500/20',
-      description: 'A searchable calendar and archive of every team meeting. Review timeline chapters, play audio clips, and track historical decisions.',
+      description: 'Review past meetings, transcript moments, decisions and tasks in one workspace.',
       bullets: [
-        'Interactive calendar timeline layout',
+        'Meeting history list',
         'Audio clip playback with synced transcript highlighting',
-        'Decisions decision log archive',
-        '1-click export to PDF, Markdown, and JSON'
+        'Decision log',
+        'Workspace search and questions'
       ],
       previewSnippet: {
         speaker: 'History Vault',
         time: '142 Meetings',
-        quote: '100% indexed and archived for permanent workspace context.'
+        quote: 'Meeting history, decisions and tasks remain available in this workspace.'
       }
     }
   ];
