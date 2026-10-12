@@ -1,16 +1,18 @@
 import uuid
 from datetime import date
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, ConfigDict
 
 from app.models.task import TaskPriority, TaskStatus
 
 
 class TaskUpdateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
     title: str | None = Field(default=None, min_length=1)
     status: TaskStatus | None = None
     priority: TaskPriority | None = None
     due_date: str | None = None
     assignee_name: str | None = None
+    assignee_id: uuid.UUID | None = None
 
     @field_validator("due_date")
     @classmethod
@@ -21,6 +23,7 @@ class TaskUpdateRequest(BaseModel):
 
 
 class TaskCreateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
     title: str = Field(min_length=1)
     workspace_id: uuid.UUID | None = None
     meeting_id: uuid.UUID | None = None
@@ -28,6 +31,7 @@ class TaskCreateRequest(BaseModel):
     priority: TaskPriority = TaskPriority.medium
     status: TaskStatus = TaskStatus.todo
     assignee_name: str | None = None
+    assignee_id: uuid.UUID | None = None
 
     @field_validator("due_date")
     @classmethod
