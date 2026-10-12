@@ -5,6 +5,7 @@ from pydantic import BaseModel, ConfigDict
 
 from app.models.meeting import MeetingStatus
 from app.models.task import TaskPriority, TaskStatus
+from app.services.meeting_language import MeetingLanguage, DisplayScript
 
 
 class ParticipantOut(BaseModel):
@@ -29,6 +30,8 @@ class LiveMeetingStartRequest(BaseModel):
     workspace_id: uuid.UUID
     meeting_url: str
     title: str | None = None
+    transcription_language: MeetingLanguage = "en"
+    display_script: DisplayScript | None = None
 
 
 class MeetingListItem(BaseModel):
@@ -36,6 +39,7 @@ class MeetingListItem(BaseModel):
 
     id: uuid.UUID
     title: str
+    created_by: uuid.UUID | None = None
     status: MeetingStatus
     source: str = "upload"
     native_meeting_id: str | None = None
@@ -45,12 +49,17 @@ class MeetingListItem(BaseModel):
 
 
 class MeetingDetail(MeetingListItem):
+    workspace_id: uuid.UUID
+    created_by: uuid.UUID | None = None
+    transcription_language: str | None = None
+    display_script: str = "original"
     audio_url: str | None = None
     language_code: str | None = None
     language_name: str | None = None
     language_confidence: float | None = None
     is_multilingual: bool = False
     failure_reason: str | None = None
+    capture_failure_reason: str | None = None
     processing_updated_at: datetime | None = None
     retry_available: bool = False
 
@@ -81,7 +90,9 @@ class TaskOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: uuid.UUID
+    meeting_id: uuid.UUID
     title: str
+    assignee_id: uuid.UUID | None = None
     assignee_name: str | None = None
     due_date: str | None = None
     priority: TaskPriority
