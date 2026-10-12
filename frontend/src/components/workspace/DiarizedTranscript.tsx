@@ -12,6 +12,7 @@ import {
   Sparkles,
 } from 'lucide-react';
 import { ApiTranscriptSegment } from '../../types';
+import { useMeetingText } from './MeetingLanguageDisplay';
 import {
   getSpeakerColorTheme,
   getSpeakerInitials,
@@ -34,6 +35,7 @@ export const DiarizedTranscript: React.FC<DiarizedTranscriptProps> = ({
   onSeek,
   isLongRecording,
 }) => {
+  const displayText = useMeetingText();
   const [searchQuery, setSearchQuery] = useState('');
   const [autoScroll, setAutoScroll] = useState(true);
   const [activeMatchIndex, setActiveMatchIndex] = useState(0);
@@ -57,7 +59,8 @@ export const DiarizedTranscript: React.FC<DiarizedTranscriptProps> = ({
     const filtered = segments.filter((seg) => {
       const match =
         seg.text.toLowerCase().includes(queryLower) ||
-        seg.speaker.toLowerCase().includes(queryLower);
+        seg.speaker.toLowerCase().includes(queryLower) ||
+        displayText(seg.text).toLowerCase().includes(queryLower) || displayText(seg.speaker).toLowerCase().includes(queryLower);
       if (match) matches.push(seg.id);
       return match;
     });
@@ -67,7 +70,7 @@ export const DiarizedTranscript: React.FC<DiarizedTranscriptProps> = ({
       searchMatchCount: matches.length,
       matchingSegmentIds: matches,
     };
-  }, [segments, searchQuery]);
+  }, [segments, searchQuery, displayText]);
 
   // Find currently active segment based on audio currentTime
   const activeSegmentId = useMemo(() => {
@@ -140,7 +143,7 @@ export const DiarizedTranscript: React.FC<DiarizedTranscriptProps> = ({
           <div className="flex items-center gap-2.5 flex-wrap">
             <h3 className="text-sm font-bold text-white uppercase tracking-wider flex items-center gap-2">
               <FileText className="w-4 h-4 text-[#8B5CF6]" />
-              <span>Diarized Transcript</span>
+              <span>Transcript with Speaker Labels</span>
               <span className="text-xs font-mono font-normal text-slate-400">
                 ({segments.length} turns)
               </span>
@@ -148,7 +151,7 @@ export const DiarizedTranscript: React.FC<DiarizedTranscriptProps> = ({
 
             {isLongRecording && (
               <span className="px-2 py-0.5 rounded-full text-[10px] font-mono font-bold bg-[#8B5CF6]/20 text-[#8B5CF6] border border-[#8B5CF6]/30">
-                Speaker Continuity Active
+                Long recording
               </span>
             )}
           </div>
@@ -251,7 +254,7 @@ export const DiarizedTranscript: React.FC<DiarizedTranscriptProps> = ({
                 className="flex items-center gap-1.5 text-xs text-slate-300 font-medium"
               >
                 <span className={`w-2.5 h-2.5 rounded-full ${spk.colorTheme.avatarBg}`} />
-                <span>{spk.speaker}</span>
+                <span>{displayText(spk.speaker)}</span>
                 <span className="text-slate-500 font-mono text-[10px]">({spk.percentage}%)</span>
               </div>
             ))}
@@ -302,7 +305,7 @@ export const DiarizedTranscript: React.FC<DiarizedTranscriptProps> = ({
                     >
                       {initials}
                     </div>
-                    <span className={`font-bold ${theme.text}`}>{tr.speaker}</span>
+                    <span className={`font-bold ${theme.text}`}>{displayText(tr.speaker)}</span>
                   </div>
 
                   <div className="flex items-center gap-2">
@@ -328,8 +331,8 @@ export const DiarizedTranscript: React.FC<DiarizedTranscriptProps> = ({
                 </div>
 
                 {/* Spoken Text with Search Query Highlight */}
-                <p className="text-xs sm:text-sm text-slate-200 leading-relaxed pl-9">
-                  {highlightText(tr.text, searchQuery)}
+                <p className="text-xs sm:text-sm text-slate-200 leading-relaxed pl-9" title={tr.text}>
+                  {highlightText(displayText(tr.text), searchQuery)}
                 </p>
               </div>
             );

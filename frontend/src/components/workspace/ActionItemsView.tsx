@@ -10,8 +10,13 @@ import {
   ExternalLink,
   Loader2,
   CheckCircle2,
+  Edit3,
+  Save,
+  X,
 } from 'lucide-react';
-import { ApiTask, TaskPriority, TaskStatus } from '../../types';
+import { ApiTask, ApiWorkspaceMember, TaskPriority, TaskStatus } from '../../types';
+import { useMeetingText } from './MeetingLanguageDisplay';
+import { useWorkspaceManager } from '../../utils/workspacePermissions';
 
 interface ActionItemsViewProps {
   tasks: ApiTask[];
@@ -20,6 +25,8 @@ interface ActionItemsViewProps {
   onAddTask: (title: string, assignee: string, priority: TaskPriority, dueDate: string) => Promise<void>;
   onSeek: (seconds: number) => void;
   onOpenKanban: () => void;
+  members: ApiWorkspaceMember[];
+  onUpdateTask: (taskId: string, updates: { title: string; assignee_name: string | null; priority: TaskPriority; due_date: string | null }) => Promise<void>;
 }
 
 export const ActionItemsView: React.FC<ActionItemsViewProps> = ({
@@ -29,13 +36,40 @@ export const ActionItemsView: React.FC<ActionItemsViewProps> = ({
   onAddTask,
   onSeek,
   onOpenKanban,
+  members,
+  onUpdateTask,
 }) => {
+  const canManage = useWorkspaceManager();
+  const displayText = useMeetingText();
   const [newTitle, setNewTitle] = useState('');
   const [newAssignee, setNewAssignee] = useState('');
   const [newPriority, setNewPriority] = useState<TaskPriority>('medium');
-  const [newDueDate, setNewDueDate] = useState('This Week');
+  const [newDueDate, setNewDueDate] = useState('');
   const [isAdding, setIsAdding] = useState(false);
   const [updatingTaskId, setUpdatingTaskId] = useState<string | null>(null);
+  const [editingTaskId, setEditingTaskId] = useState<string | null>(null);
+  const [editTitle, setEditTitle] = useState('');
+  const [editAssignee, setEditAssignee] = useState('');
+  const [editPriority, setEditPriority] = useState<TaskPriority>('medium');
+  const [editDueDate, setEditDueDate] = useState('');
+
+  const beginEdit = (task: ApiTask) => {
+    setEditingTaskId(task.id);
+    setEditTitle(task.title);
+    setEditAssignee(task.assignee_id || task.assignee_name || '');
+    setEditPriority(task.priority);
+    setEditDueDate(task.due_date || '');
+  };
+
+  const saveEdit = async () => {
+    if (!editingTaskId || !editTitle.trim()) return;
+    setUpdatingTaskId(editingTaskId);
+    try {
+      await onUpdateTask(editingTaskId, { title: editTitle.trim(), assignee_name: editAssignee || null,
+        priority: editPriority, due_date: editDueDate || null });
+      setEditingTaskId(null);
+    } finally { setUpdatingTaskId(null); }
+  };
 
   const parseTimestampSeconds = (ts?: string | null): number | null => {
     if (!ts) return null;
@@ -55,6 +89,7 @@ export const ActionItemsView: React.FC<ActionItemsViewProps> = ({
       await onAddTask(newTitle.trim(), newAssignee.trim(), newPriority, newDueDate);
       setNewTitle('');
       setNewAssignee('');
+      setNewDueDate('');
     } finally {
       setIsAdding(false);
     }
@@ -77,7 +112,7 @@ export const ActionItemsView: React.FC<ActionItemsViewProps> = ({
           <div className="flex items-center gap-2">
             <CheckSquare className="w-4 h-4 text-[#8B5CF6]" />
             <h3 className="text-sm font-bold text-white uppercase tracking-wider">
-              Extracted Action Items ({tasks.length})
+              Action Items ({tasks.length})
             </h3>
           </div>
 
@@ -95,7 +130,7 @@ export const ActionItemsView: React.FC<ActionItemsViewProps> = ({
           <div className="p-10 text-center border border-dashed border-[#27272A] rounded-xl space-y-2">
             <CheckCircle2 className="w-8 h-8 text-emerald-400 mx-auto" />
             <p className="text-xs text-slate-400">
-              No action items were identified in this meeting.
+              {canManage ? 'No action items were identified in this meeting.' : 'No tasks are assigned to you in this meeting.'}
             </p>
           </div>
         ) : (
@@ -134,11 +169,13 @@ export const ActionItemsView: React.FC<ActionItemsViewProps> = ({
                           isDone ? 'line-through text-slate-400' : 'text-white'
                         }`}
                       >
-                        {task.title}
+                        {displayText(task.title)}
                       </span>
                     </div>
 
                     <div className="flex items-center gap-1.5 shrink-0">
+                      <button disabled={!canManage} type="button" onClick={() => beginEdit(task)} className="p-1 text-slate-400 hover:text-white"
+                        aria-label={`Edit task ${task.title}`}><Edit3 className="w-3.5 h-3.5" /></button>
                       {/* Priority Badge */}
                       <span
                         className={`text-[9px] font-mono uppercase px-2 py-0.5 rounded font-bold ${
@@ -154,6 +191,7 @@ export const ActionItemsView: React.FC<ActionItemsViewProps> = ({
 
                       {/* Delete Task */}
                       <button
+                        disabled={!canManage}
                         onClick={() => onDeleteTask(task.id, task.title)}
                         title="Delete Action Item"
                         className="p-1 rounded text-slate-500 hover:text-rose-400 hover:bg-rose-500/10 transition-colors cursor-pointer"
@@ -169,13 +207,13 @@ export const ActionItemsView: React.FC<ActionItemsViewProps> = ({
                       <span className="flex items-center gap-1">
                         <User className="w-3 h-3 text-slate-500" />
                         <span className="text-slate-300 font-medium">
-                          {task.assignee_name || 'Unassigned'}
+                          {task.assignee_id ? displayText(task.assignee_name) : task.assignee_name ? `Unconfirmed: ${displayText(task.assignee_name)}` : 'Unassigned'}
                         </span>
                       </span>
 
                       <span className="flex items-center gap-1 text-[11px] font-mono text-slate-500">
                         <Calendar className="w-3 h-3" />
-                        <span>{task.due_date || 'This Week'}</span>
+                        <span>{task.due_date || 'No due date'}</span>
                       </span>
                     </div>
 
@@ -204,6 +242,27 @@ export const ActionItemsView: React.FC<ActionItemsViewProps> = ({
                       </select>
                     </div>
                   </div>
+                  {editingTaskId === task.id && (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-2 border-t border-[#27272A]">
+                      <input value={editTitle} onChange={(event) => setEditTitle(event.target.value)} aria-label="Task title"
+                        className="bg-[#111113] border border-[#8B5CF6]/40 rounded px-2 py-1 text-xs text-white sm:col-span-2" />
+                      <select value={editAssignee} onChange={(event) => setEditAssignee(event.target.value)} aria-label="Task assignee"
+                        className="bg-[#111113] border border-[#27272A] rounded px-2 py-1 text-xs text-white">
+                        <option value="">Unassigned</option>
+                        {members.map((member) => <option key={member.user_id} value={member.user_id}>{member.name} · {member.email}</option>)}
+                      </select>
+                      <select value={editPriority} onChange={(event) => setEditPriority(event.target.value as TaskPriority)} aria-label="Task priority"
+                        className="bg-[#111113] border border-[#27272A] rounded px-2 py-1 text-xs text-white">
+                        <option value="low">Low</option><option value="medium">Medium</option><option value="high">High</option>
+                      </select>
+                      <input type="date" value={editDueDate} onChange={(event) => setEditDueDate(event.target.value)} aria-label="Task due date"
+                        className="bg-[#111113] border border-[#27272A] rounded px-2 py-1 text-xs text-white" />
+                      <div className="flex gap-3 justify-end">
+                        <button type="button" onClick={() => setEditingTaskId(null)} aria-label="Cancel task edit"><X className="w-4 h-4 text-slate-400" /></button>
+                        <button type="button" onClick={saveEdit} disabled={updatingTaskId === task.id || !editTitle.trim()} aria-label="Save task"><Save className="w-4 h-4 text-emerald-400" /></button>
+                      </div>
+                    </div>
+                  )}
                 </div>
               );
             })}
@@ -212,7 +271,7 @@ export const ActionItemsView: React.FC<ActionItemsViewProps> = ({
       </div>
 
       {/* Quick Add Action Item Bar */}
-      <div className="p-5 rounded-2xl bg-[#111113] border border-[#27272A] space-y-3 shadow-xl">
+      {canManage && <div className="p-5 rounded-2xl bg-[#111113] border border-[#27272A] space-y-3 shadow-xl">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2 text-xs font-bold text-white uppercase tracking-wider">
             <Plus className="w-4 h-4 text-[#8B5CF6]" />
@@ -230,13 +289,14 @@ export const ActionItemsView: React.FC<ActionItemsViewProps> = ({
             className="flex-1 bg-[#18181b] border border-[#27272A] rounded-xl px-3.5 py-2 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-[#8B5CF6]"
           />
 
-          <input
-            type="text"
-            placeholder="Assignee (e.g. Speaker 1)"
-            value={newAssignee}
-            onChange={(e) => setNewAssignee(e.target.value)}
-            className="w-full sm:w-40 bg-[#18181b] border border-[#27272A] rounded-xl px-3.5 py-2 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-[#8B5CF6]"
-          />
+          <select value={newAssignee} onChange={(e) => setNewAssignee(e.target.value)} aria-label="New task assignee"
+            className="w-full sm:w-40 bg-[#18181b] border border-[#27272A] rounded-xl px-3.5 py-2 text-xs text-white">
+            <option value="">Unassigned</option>
+            {members.map((member) => <option key={member.user_id} value={member.user_id}>{member.name} · {member.email}</option>)}
+          </select>
+
+          <input type="date" value={newDueDate} onChange={(e) => setNewDueDate(e.target.value)} aria-label="New task due date"
+            className="w-full sm:w-40 bg-[#18181b] border border-[#27272A] rounded-xl px-3.5 py-2 text-xs text-white" />
 
           <select
             value={newPriority}
@@ -257,7 +317,7 @@ export const ActionItemsView: React.FC<ActionItemsViewProps> = ({
             <span>Add Item</span>
           </button>
         </form>
-      </div>
+      </div>}
     </div>
   );
 };
