@@ -1,93 +1,37 @@
-import sys
 import unittest
 import uuid
-from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-backend_dir = Path(__file__).resolve().parent.parent
-if str(backend_dir) not in sys.path:
-    sys.path.insert(0, str(backend_dir))
-
-# Mock optional third-party modules if needed
-for mod in ["pydantic_settings", "google", "google.genai", "google.genai.errors", "redis", "gradio_client"]:
-    if mod not in sys.modules:
-        try:
-            __import__(mod)
-        except ImportError:
-            sys.modules[mod] = MagicMock()
-
-from app.models.transcript import TranscriptSegment
-from app.services.chat_service import _extract_citation, answer_question
+from app.models.meeting import Meeting
+from app.services.chat_service import answer_question
+from app.services.knowledge_chat_service import GroundedAnswer
+from app.services.knowledge_retriever import Evidence
 
 
-class TestRAGChatService(unittest.TestCase):
+class MeetingChatTests(unittest.TestCase):
     def setUp(self):
         self.meeting_id = uuid.uuid4()
-        self.seg1 = TranscriptSegment(
-            id=uuid.uuid4(),
-            meeting_id=self.meeting_id,
-            speaker="Alice",
-            start_time=12.5,
-            end_time=25.0,
-            text="We finalized the cloud database migration budget at $45,000 for Q3.",
-            embedding=[0.1] * 768,
-        )
-        self.seg2 = TranscriptSegment(
-            id=uuid.uuid4(),
-            meeting_id=self.meeting_id,
-            speaker="Bob",
-            start_time=45.0,
-            end_time=60.0,
-            text="Let's ensure the security audit is completed before the product release.",
-            embedding=[0.2] * 768,
-        )
+        self.workspace_id = uuid.uuid4()
+        self.db = MagicMock()
+        self.db.get.return_value = Meeting(id=self.meeting_id, workspace_id=self.workspace_id,
+                                            title="Budget", created_by=uuid.uuid4())
 
-    def test_extract_citation_from_answer(self):
-        """Tests that explicit timestamps in LLM answers are extracted accurately."""
-        answer = "The security audit was discussed at 00:45 by Bob."
-        citation = _extract_citation(answer, self.seg2)
-        self.assertEqual(citation, "00:45")
-
-    def test_extract_citation_fallback_to_top_segment(self):
-        """Tests that when no explicit timestamp is in text, top semantic segment timestamp is used."""
-        answer = "The cloud database migration budget was set to $45,000."
-        citation = _extract_citation(answer, self.seg1)
-        self.assertEqual(citation, "00:12")
-
-    def test_extract_citation_suppressed_on_negative_answer(self):
-        """Tests that citations are NOT attached when LLM could not find information in meeting."""
-        answer = "I couldn't find any mention of Kubernetes cluster scaling in this meeting."
-        citation = _extract_citation(answer, self.seg1)
-        self.assertIsNone(citation)
-
-        answer2 = "The transcript does not contain information about office re-opening."
-        citation2 = _extract_citation(answer2, self.seg1)
-        self.assertIsNone(citation2)
-
-    @patch("app.services.chat_service.generate_text")
-    @patch("app.services.chat_service._retrieve_relevant_segments")
-    def test_answer_question_successful_flow(self, mock_retrieve, mock_generate):
-        """Tests end-to-end question answering flow with vector retrieval and grounding."""
-        mock_retrieve.return_value = [self.seg1, self.seg2]
-        mock_generate.return_value = "The team agreed on a $45,000 migration budget at 00:12."
-
-        mock_db = MagicMock()
-        answer, cited_ts = answer_question(mock_db, self.meeting_id, "What is the migration budget?")
-
+    @patch("app.services.chat_service.get_ai_provider")
+    @patch("app.services.chat_service.KnowledgeRetriever")
+    def test_citation_must_match_retrieved_meeting_segment(self, retriever_cls, provider_fn):
+        retriever_cls.return_value.retrieve.return_value = [
+            Evidence("transcript:one", "Alice: Budget is $45,000.",
+                     {"type": "meeting", "meeting_id": str(self.meeting_id), "timestamp": "00:12"})]
+        provider_fn.return_value.structured.return_value = GroundedAnswer(
+            answer="The budget is $45,000.", source_ids=["transcript:one"])
+        answer, timestamp = answer_question(self.db, self.meeting_id, "What budget?")
         self.assertIn("$45,000", answer)
-        self.assertEqual(cited_ts, "00:12")
+        self.assertEqual(timestamp, "00:12")
+        retriever_cls.return_value.retrieve.assert_called_once_with("What budget?", meeting_id=self.meeting_id)
 
-    @patch("app.services.chat_service._retrieve_relevant_segments")
-    def test_answer_question_empty_transcript(self, mock_retrieve):
-        """Tests handling when meeting has no transcribed segments."""
-        mock_retrieve.return_value = []
-        mock_db = MagicMock()
-        mock_db.query().filter().order_by().limit().all.return_value = []
-
-        answer, cited_ts = answer_question(mock_db, self.meeting_id, "Who was speaking?")
-        self.assertIn("couldn't find any transcribed content", answer)
-        self.assertIsNone(cited_ts)
-
-
-if __name__ == "__main__":
-    unittest.main()
+    @patch("app.services.chat_service.KnowledgeRetriever")
+    def test_empty_meeting_cannot_generate_answer(self, retriever_cls):
+        retriever_cls.return_value.retrieve.return_value = []
+        answer, timestamp = answer_question(self.db, self.meeting_id, "Unrecorded topic?")
+        self.assertIn("enough evidence", answer)
+        self.assertIsNone(timestamp)
