@@ -7,7 +7,7 @@ export const ProblemSection: React.FC = () => {
       emoji: '🎙️',
       title: 'Record',
       subtitle: 'Upload your meeting.',
-      description: 'Sync live from Zoom, Google Meet, Teams, or drag & drop raw MP3/MP4 audio recordings.',
+      description: 'Upload a meeting recording from your computer to begin processing.',
       icon: Mic,
       glow: 'hover:border-[#8B5CF6]/50 hover:shadow-[#8B5CF6]/10'
     },
@@ -15,7 +15,7 @@ export const ProblemSection: React.FC = () => {
       emoji: '🤖',
       title: 'Understand',
       subtitle: 'AI listens.',
-      description: 'Whisper HD diarization accurately recognizes speakers, cancels noise, and identifies key moments.',
+      description: 'Local speech recognition creates timestamped transcript segments for review.',
       icon: Bot,
       glow: 'hover:border-[#3B82F6]/50 hover:shadow-[#3B82F6]/10'
     },
@@ -31,7 +31,7 @@ export const ProblemSection: React.FC = () => {
       emoji: '🚀',
       title: 'Execute',
       subtitle: 'Everyone knows what to do.',
-      description: 'Automated sync pushes tickets straight to Linear, Jira, Notion, and Slack channels.',
+      description: 'Review extracted work in the workspace task list and assign owners when appropriate.',
       icon: Rocket,
       glow: 'hover:border-purple-500/50 hover:shadow-purple-500/10'
     }

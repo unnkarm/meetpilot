@@ -62,16 +62,16 @@ export const FeatureGrid: React.FC = () => {
               </div>
 
               <h3 className="text-xl font-bold text-[#FAFAFA] mb-2 group-hover:text-[#3B82F6] transition-colors">
-                Speaker Recognition
+                Timestamped Transcript
               </h3>
 
               <p className="text-xs text-slate-400 leading-relaxed font-sans">
-                Whisper HD diarization accurately assigns every spoken sentence to the exact team member with 0.1s timestamp precision.
+                Local transcription keeps real segment timestamps. The default setup uses an unknown-speaker label until voices are verified.
               </p>
             </div>
 
             <div className="pt-4 mt-4 border-t border-[#27272A] text-[11px] font-mono text-slate-500">
-              99.2% Diarization Accuracy
+              Inspect Speech Evidence
             </div>
           </div>
 
@@ -87,12 +87,12 @@ export const FeatureGrid: React.FC = () => {
               </h3>
 
               <p className="text-xs text-slate-400 leading-relaxed font-sans">
-                Auto-extracts explicit commitments, assigns responsible owners, sets realistic deadlines, and pushes tickets to Linear & Jira.
+                Extracts proposed commitments with source timestamps. Review titles, owners and deadlines in the task list.
               </p>
             </div>
 
             <div className="pt-4 mt-4 border-t border-[#27272A] text-[11px] font-mono text-slate-500">
-              Auto-Synced to Linear
+              Editable Workspace Tasks
             </div>
           </div>
 
@@ -134,7 +134,7 @@ export const FeatureGrid: React.FC = () => {
             </div>
 
             <div className="pt-4 mt-4 border-t border-[#27272A] text-[11px] font-mono text-slate-500">
-              100% Encrypted Store
+              Workspace Access Checks
             </div>
           </div>
 

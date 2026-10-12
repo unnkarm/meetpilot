@@ -459,10 +459,10 @@ export const DashboardPreview: React.FC = () => {
 
             <div className="p-3 rounded-xl bg-gradient-to-r from-[#8B5CF6]/20 to-[#3B82F6]/10 border border-[#8B5CF6]/30 text-xs text-slate-300 space-y-1">
               <div className="font-bold text-[#FAFAFA] flex items-center gap-1.5">
-                <AlertCircle className="w-3.5 h-3.5 text-[#8B5CF6]" /> Auto-Sync Active
+                <AlertCircle className="w-3.5 h-3.5 text-[#8B5CF6]" /> Illustrative Preview
               </div>
               <p className="text-[11px] text-slate-400">
-                All deadlines are synced bi-directionally with Linear and Slack channels.
+                Sample workspace content shows how meeting follow-up can be reviewed in one place.
               </p>
             </div>
 

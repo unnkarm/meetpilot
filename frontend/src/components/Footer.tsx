@@ -1,12 +1,12 @@
+import { Github, Heart } from 'lucide-react';
 import { MeetPilotLogo } from './Logo';
 
 interface FooterProps {
   onOpenPrivacy: () => void;
   onOpenDocs: () => void;
-  onOpenPricing: () => void;
 }
 
-export const Footer: React.FC<FooterProps> = ({ onOpenPrivacy, onOpenDocs, onOpenPricing }) => {
+export const Footer: React.FC<FooterProps> = ({ onOpenPrivacy, onOpenDocs }) => {
   const scrollTo = (id: string) => {
     const element = document.getElementById(id);
     if (element) {
@@ -25,11 +25,11 @@ export const Footer: React.FC<FooterProps> = ({ onOpenPrivacy, onOpenDocs, onOpe
             <MeetPilotLogo className="h-8" />
 
             <p className="text-slate-400 max-w-sm leading-relaxed">
-              The AI meeting intelligence platform that turns team conversations into searchable transcripts, concise summaries, and automated task execution.
+              Turn meeting recordings into searchable transcripts, concise summaries, and reviewable follow-up tasks.
             </p>
 
             <div className="text-slate-500 text-[11px] font-mono">
-              Engineered for privacy, compliance & zero-latency RAG search.
+              Local AI processing with source-linked workspace answers.
             </div>
           </div>
 
@@ -46,12 +46,6 @@ export const Footer: React.FC<FooterProps> = ({ onOpenPrivacy, onOpenDocs, onOpe
               <li>
                 <button onClick={() => scrollTo('dashboard-preview')} className="hover:text-white transition-colors cursor-pointer">Live Workspace</button>
               </li>
-              <li>
-                <button onClick={onOpenPricing} className="hover:text-white transition-colors flex items-center gap-1 cursor-pointer">
-                  <span>Pricing</span>
-                  <span className="text-[9px] px-1.5 py-0.2 rounded bg-white/10 text-slate-300 font-mono">Soon</span>
-                </button>
-              </li>
             </ul>
           </div>
 
@@ -63,7 +57,7 @@ export const Footer: React.FC<FooterProps> = ({ onOpenPrivacy, onOpenDocs, onOpe
                 <button onClick={onOpenDocs} className="hover:text-white transition-colors cursor-pointer">Docs & API</button>
               </li>
               <li>
-                <button onClick={onOpenPrivacy} className="hover:text-white transition-colors cursor-pointer">Privacy Policy</button>
+                <button onClick={onOpenPrivacy} className="hover:text-white transition-colors cursor-pointer">Data Handling</button>
               </li>
               <li>
                 <a href="https://github.com" target="_blank" rel="noopener noreferrer" className="hover:text-white transition-colors flex items-center gap-1">
@@ -78,9 +72,9 @@ export const Footer: React.FC<FooterProps> = ({ onOpenPrivacy, onOpenDocs, onOpe
           <div className="md:col-span-2 space-y-3">
             <div className="font-bold text-[#FAFAFA] text-xs uppercase tracking-wider">Security</div>
             <ul className="space-y-2 text-slate-400">
-              <li>SOC2 Type II Certified</li>
-              <li>256-bit AES Encryption</li>
-              <li>GDPR Compliant</li>
+              <li>Clerk authentication</li>
+              <li>Workspace access checks</li>
+              <li>Local file storage</li>
             </ul>
           </div>
 

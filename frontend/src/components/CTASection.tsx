@@ -23,7 +23,7 @@ export const CTASection: React.FC<CTASectionProps> = ({ onOpenGetStarted }) => {
         </h2>
 
         <p className="text-base sm:text-xl text-slate-300 max-w-2xl mx-auto leading-relaxed font-normal">
-          Join high-growth engineering, product, and leadership teams turning unstructured meeting talk into instant clarity and automated execution.
+          Turn a recording into a transcript, a reviewable summary, and follow-up work in your workspace.
         </p>
 
         <div className="flex flex-col sm:flex-row items-center justify-center gap-4 pt-4">
@@ -31,20 +31,20 @@ export const CTASection: React.FC<CTASectionProps> = ({ onOpenGetStarted }) => {
             onClick={onOpenGetStarted}
             className="w-full sm:w-auto px-9 py-4 rounded-xl text-base font-bold text-white bg-[#8B5CF6] hover:bg-[#7c3aed] shadow-2xl shadow-[#8B5CF6]/30 hover:scale-[1.02] active:scale-[0.98] transition-all duration-200 flex items-center justify-center gap-2.5 group cursor-pointer"
           >
-            <span>Start Free</span>
+            <span>Get Started</span>
             <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
           </button>
         </div>
 
         <div className="flex flex-wrap items-center justify-center gap-6 pt-4 text-xs text-slate-400">
           <span className="flex items-center gap-1.5">
-            <Check className="w-4 h-4 text-emerald-400" /> No credit card required
+            <Check className="w-4 h-4 text-emerald-400" /> Local AI models
           </span>
           <span className="flex items-center gap-1.5">
-            <Check className="w-4 h-4 text-emerald-400" /> Free 14-day trial
+            <Check className="w-4 h-4 text-emerald-400" /> Reviewable AI results
           </span>
           <span className="flex items-center gap-1.5">
-            <ShieldCheck className="w-4 h-4 text-[#8B5CF6]" /> SOC2 Compliant & Encrypted
+            <ShieldCheck className="w-4 h-4 text-[#8B5CF6]" /> Workspace access checks
           </span>
         </div>
 

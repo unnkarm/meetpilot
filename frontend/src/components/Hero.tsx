@@ -103,7 +103,7 @@ export const Hero: React.FC<HeroProps> = ({ onOpenGetStarted, onOpenWatchDemo })
                   <span className="ml-2 text-sm font-bold text-[#FAFAFA]">Sprint Planning</span>
                 </div>
                 <span className="px-2.5 py-1 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 text-xs font-mono">
-                  Live Sync
+                  Example Result
                 </span>
               </div>
 
@@ -114,7 +114,7 @@ export const Hero: React.FC<HeroProps> = ({ onOpenGetStarted, onOpenWatchDemo })
                     <Check className="w-3.5 h-3.5" />
                   </div>
                   <span className="text-[#FAFAFA] font-medium">Transcript Ready</span>
-                  <span className="ml-auto text-xs text-slate-500">0.4s</span>
+                  <span className="ml-auto text-xs text-slate-500">Timestamped</span>
                 </div>
 
                 <div className="flex items-center gap-3 p-3 rounded-xl bg-[#18181b] border border-[#27272A] hover:border-[#8B5CF6]/30 transition-colors group">

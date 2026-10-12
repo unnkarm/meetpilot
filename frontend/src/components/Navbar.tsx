@@ -8,7 +8,6 @@ import { MeetPilotLogo } from './Logo';
 interface NavbarProps {
   onOpenGetStarted: () => void;
   onOpenWatchDemo: () => void;
-  onOpenPricing: () => void;
   onOpenDocs: () => void;
   onOpenAbout: () => void;
   onOpenFeaturesModal: () => void;
@@ -18,7 +17,6 @@ interface NavbarProps {
 
 export const Navbar: React.FC<NavbarProps> = ({
   onOpenGetStarted,
-  onOpenPricing,
   onOpenDocs,
   onOpenAbout,
   onOpenFeaturesModal,
@@ -63,12 +61,6 @@ export const Navbar: React.FC<NavbarProps> = ({
           >
             <span>App Workspace</span>
             <span className="w-1.5 h-1.5 rounded-full bg-[#8B5CF6] animate-pulse"></span>
-          </button>
-          <button
-            onClick={onOpenPricing}
-            className="px-3 py-1.5 rounded-lg hover:text-white hover:bg-[#18181b] transition-all text-slate-400 hover:text-slate-200 flex items-center gap-1.5 cursor-pointer"
-          >
-            Pricing <span className="text-[10px] px-1.5 py-0.2 rounded bg-white/10 text-slate-300 font-mono">Coming Soon</span>
           </button>
           <button
             onClick={onOpenDocs}
@@ -157,13 +149,6 @@ export const Navbar: React.FC<NavbarProps> = ({
             className="w-full text-left py-2 text-[#8B5CF6] text-sm font-bold"
           >
             Enter Workspace Application
-          </button>
-          <button
-            onClick={() => { setMobileMenuOpen(false); onOpenPricing(); }}
-            className="w-full text-left py-2 text-slate-300 text-sm font-medium flex items-center justify-between"
-          >
-            <span>Pricing</span>
-            <span className="text-[10px] px-2 py-0.5 rounded bg-white/10 text-slate-300 font-mono">Coming Soon</span>
           </button>
           <button
             onClick={() => { setMobileMenuOpen(false); onOpenDocs(); }}

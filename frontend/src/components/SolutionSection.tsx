@@ -15,7 +15,7 @@ export const SolutionSection: React.FC<SolutionSectionProps> = ({ onOpenGetStart
       emoji: "🎙️",
       title: "AI Transcription",
       headline: "Every word becomes searchable.",
-      description: "Whisper-level accuracy speaker diarization that indexes every phrase, technical acronym, and participant contribution instantly.",
+      description: "Transcription makes timestamped meeting speech searchable. Review speaker identity before relying on it.",
       preview: {
         type: "transcript",
         speaker: "Sarah Chen",
@@ -58,7 +58,7 @@ export const SolutionSection: React.FC<SolutionSectionProps> = ({ onOpenGetStart
       icon: MessageSquare,
       emoji: "💬",
       title: "AI Chat",
-      headline: "Ask: 'Who owns deployment?' and receive answers instantly.",
+      headline: "Ask: 'Who owns deployment?' and inspect the sources.",
       description: "Contextual RAG engine connected directly to your meeting audio. Ask any question in plain language and get citation timestamps.",
       preview: {
         type: "chat",
@@ -182,7 +182,7 @@ export const SolutionSection: React.FC<SolutionSectionProps> = ({ onOpenGetStart
                         </p>
                       </div>
                       <div className="text-[11px] text-slate-500 text-center font-mono">
-                        🔍 Search terms highlighted in sub-10ms
+                        🔍 Search terms highlighted in source excerpts
                       </div>
                     </div>
                   )}

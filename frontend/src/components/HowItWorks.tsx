@@ -7,15 +7,15 @@ export const HowItWorks: React.FC = () => {
   const pipelineNodes = [
     {
       title: 'Meeting',
-      desc: 'Live audio or MP4/Zoom sync',
+      desc: 'Upload an audio recording',
       icon: Video,
       badge: 'Input'
     },
     {
       title: 'Transcript',
-      desc: 'Whisper HD speaker diarization',
+      desc: 'Local, timestamped transcription',
       icon: Mic,
-      badge: '0.4s'
+      badge: 'Local ASR'
     },
     {
       title: 'Summary',
@@ -25,7 +25,7 @@ export const HowItWorks: React.FC = () => {
     },
     {
       title: 'Tasks',
-      desc: 'Auto-assigned to Linear & Jira',
+      desc: 'Review and assign extracted tasks',
       icon: CheckSquare,
       badge: 'Extracted'
     },
