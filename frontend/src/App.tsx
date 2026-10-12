@@ -14,7 +14,6 @@ import { Footer } from './components/Footer';
 
 import { GetStartedModal } from './components/GetStartedModal';
 import { WatchDemoModal } from './components/WatchDemoModal';
-import { PricingModal } from './components/PricingModal';
 import { DocsDrawer } from './components/DocsDrawer';
 import { PrivacyModal } from './components/PrivacyModal';
 import { AboutModal } from './components/AboutModal';
@@ -29,7 +28,6 @@ export default function App() {
 
   const [getStartedOpen, setGetStartedOpen] = useState(false);
   const [watchDemoOpen, setWatchDemoOpen] = useState(false);
-  const [pricingOpen, setPricingOpen] = useState(false);
   const [docsOpen, setDocsOpen] = useState(false);
   const [privacyOpen, setPrivacyOpen] = useState(false);
   const [aboutOpen, setAboutOpen] = useState(false);
@@ -108,7 +106,6 @@ export default function App() {
       <Navbar
         onOpenGetStarted={() => setGetStartedOpen(true)}
         onOpenWatchDemo={() => setWatchDemoOpen(true)}
-        onOpenPricing={() => setPricingOpen(true)}
         onOpenDocs={() => setDocsOpen(true)}
         onOpenAbout={() => setAboutOpen(true)}
         onOpenFeaturesModal={() => setFeaturesOpen(true)}
@@ -156,7 +153,6 @@ export default function App() {
       <Footer
         onOpenPrivacy={() => setPrivacyOpen(true)}
         onOpenDocs={() => setDocsOpen(true)}
-        onOpenPricing={() => setPricingOpen(true)}
       />
 
       {/* Modals & Overlays */}
@@ -169,12 +165,6 @@ export default function App() {
       <WatchDemoModal
         isOpen={watchDemoOpen}
         onClose={() => setWatchDemoOpen(false)}
-      />
-
-      <PricingModal
-        isOpen={pricingOpen}
-        onClose={() => setPricingOpen(false)}
-        onOpenGetStarted={() => setGetStartedOpen(true)}
       />
 
       <DocsDrawer

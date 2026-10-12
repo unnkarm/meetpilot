@@ -1,6 +1,8 @@
+import { SignIn, useAuth } from '@clerk/clerk-react';
 import { Loader2, Shield } from 'lucide-react';
 import { MeetPilotLogo } from './Logo';
 import { CLERK_APPEARANCE } from './AuthModal';
+import { SWRConfig } from 'swr';
 
 interface ProtectedRouteProps {
   children: React.ReactNode;
@@ -14,7 +16,7 @@ interface ProtectedRouteProps {
 const isProduction = import.meta.env.PROD;
 
 export const ProtectedRoute: React.FC<ProtectedRouteProps> = ({ children }) => {
-  const { isLoaded, isSignedIn } = useAuth();
+  const { isLoaded, isSignedIn, userId } = useAuth();
 
   // Clerk hasn't resolved session yet
   if (!isLoaded) {
@@ -70,5 +72,5 @@ export const ProtectedRoute: React.FC<ProtectedRouteProps> = ({ children }) => {
   }
 
   // Authenticated → render the protected content
-  return <>{children}</>;
+  return <SWRConfig key={userId} value={{ provider: () => new Map() }}>{children}</SWRConfig>;
 };

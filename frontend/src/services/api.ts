@@ -18,9 +18,10 @@ import {
   ApiWorkspaceSearchResult,
   TaskPriority,
   TaskStatus,
+  isProcessingStatus,
 } from '../types';
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
+const API_BASE_URL = import.meta.env?.VITE_API_BASE_URL || 'http://localhost:8000';
 
 let globalClerkUser: { email?: string; name?: string; avatar?: string } | null = null;
 
@@ -100,7 +101,7 @@ export function useWorkspaces(getToken?: () => Promise<string | null>) {
   return useSWR<ApiWorkspace[]>(
     '/api/v1/workspaces',
     createTokenFetcher(getToken),
-    { revalidateOnFocus: true }
+    { revalidateOnFocus: true, refreshInterval: 15000 }
   );
 }
 
@@ -137,8 +138,7 @@ export function useMeetingDetail(meetingId?: string | null, getToken?: () => Pro
         // Poll every 3 seconds if meeting is in_progress, queued or processing
         if (
           latestData?.status === 'in_progress' ||
-          latestData?.status === 'queued' ||
-          latestData?.status === 'processing'
+          isProcessingStatus(latestData?.status)
         ) {
           return 3000;
         }
@@ -231,12 +231,16 @@ export async function uploadMeetingAudio(
   workspaceId: string,
   title: string,
   file: File,
-  getToken?: () => Promise<string | null>
+  getToken?: () => Promise<string | null>,
+  language = 'en',
+  displayScript: 'original' | 'romanized' = language === 'hi' || language === 'bn' ? 'romanized' : 'original'
 ): Promise<{ id: string; title: string; status: string }> {
   const formData = new FormData();
   formData.append('workspace_id', workspaceId);
   formData.append('title', title);
   formData.append('file', file);
+  formData.append('transcription_language', language);
+  formData.append('display_script', displayScript);
 
   return apiFetch<{ id: string; title: string; status: string }>(
     '/api/v1/meetings/upload',
@@ -260,6 +264,10 @@ export async function createWorkspaceApi(
     },
     getToken
   );
+}
+
+export async function createDemoWorkspaceApi(getToken?: () => Promise<string | null>): Promise<ApiWorkspace> {
+  return apiFetch<ApiWorkspace>('/api/v1/workspaces/demo', { method: 'POST' }, getToken);
 }
 
 export async function inviteWorkspaceMemberApi(
@@ -315,9 +323,14 @@ export async function updateTaskApi(
     title?: string;
     due_date?: string | null;
     assignee_name?: string | null;
+    assignee_id?: string | null;
   },
   getToken?: () => Promise<string | null>
 ): Promise<ApiTask> {
+  if (updates.assignee_name && /^[0-9a-f]{8}-[0-9a-f-]{27}$/i.test(updates.assignee_name)) {
+    updates = { ...updates, assignee_id: updates.assignee_name };
+    delete updates.assignee_name;
+  }
   return apiFetch<ApiTask>(
     `/api/v1/tasks/${taskId}`,
     {
@@ -334,12 +347,17 @@ export async function createTaskApi(
     workspace_id?: string;
     meeting_id?: string;
     assignee_name?: string;
+    assignee_id?: string;
     due_date?: string;
     priority?: TaskPriority;
     status?: TaskStatus;
   },
   getToken?: () => Promise<string | null>
 ): Promise<ApiTask> {
+  if (taskData.assignee_name && /^[0-9a-f]{8}-[0-9a-f-]{27}$/i.test(taskData.assignee_name)) {
+    taskData = { ...taskData, assignee_id: taskData.assignee_name };
+    delete taskData.assignee_name;
+  }
   return apiFetch<ApiTask>(
     '/api/v1/tasks',
     {
@@ -391,6 +409,34 @@ export async function updateMeetingApi(
     },
     getToken
   );
+}
+
+export async function updateMeetingSummaryApi(
+  meetingId: string,
+  updates: { overview?: string; key_takeaways?: string[]; next_steps?: string[] },
+  getToken?: () => Promise<string | null>
+): Promise<ApiMeetingSummary> {
+  return apiFetch<ApiMeetingSummary>(`/api/v1/meetings/${meetingId}/summary`,
+    { method: 'PATCH', body: JSON.stringify(updates) }, getToken);
+}
+
+export async function updateDecisionApi(
+  meetingId: string,
+  decisionId: string,
+  updates: { topic?: string; outcome?: string },
+  getToken?: () => Promise<string | null>
+): Promise<ApiDecision> {
+  return apiFetch<ApiDecision>(`/api/v1/meetings/${meetingId}/decisions/${decisionId}`,
+    { method: 'PATCH', body: JSON.stringify(updates) }, getToken);
+}
+
+export async function deleteDecisionApi(
+  meetingId: string,
+  decisionId: string,
+  getToken?: () => Promise<string | null>
+): Promise<void> {
+  await apiFetch<void>(`/api/v1/meetings/${meetingId}/decisions/${decisionId}`,
+    { method: 'DELETE' }, getToken);
 }
 
 export async function deleteTaskApi(
@@ -581,7 +627,9 @@ export async function startLiveMeeting(
   workspaceId: string,
   meetingUrl: string,
   title?: string,
-  getToken?: () => Promise<string | null>
+  getToken?: () => Promise<string | null>,
+  language = 'en',
+  displayScript: 'original' | 'romanized' = language === 'hi' || language === 'bn' ? 'romanized' : 'original'
 ): Promise<ApiMeetingDetail> {
   return apiFetch<ApiMeetingDetail>(
     '/api/v1/meetings/live/start',
@@ -591,10 +639,17 @@ export async function startLiveMeeting(
         workspace_id: workspaceId,
         meeting_url: meetingUrl,
         title: title || undefined,
+        transcription_language: language,
+        display_script: displayScript,
       }),
     },
     getToken
   );
+}
+
+export function updateMeetingDisplayScript(meetingId: string, displayScript: 'original' | 'romanized', getToken?: () => Promise<string | null>) {
+  return apiFetch<ApiMeetingDetail>(`/api/v1/meetings/${meetingId}`,
+    { method: 'PATCH', body: JSON.stringify({ display_script: displayScript }) }, getToken);
 }
 
 export async function stopLiveMeeting(

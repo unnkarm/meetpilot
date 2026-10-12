@@ -1,6 +1,9 @@
 export type TaskPriority = 'low' | 'medium' | 'high';
 export type TaskStatus = 'todo' | 'doing' | 'done';
-export type MeetingStatus = 'in_progress' | 'queued' | 'processing' | 'completed' | 'failed';
+export type MeetingStatus = 'in_progress' | 'queued' | 'processing' | 'transcribing' | 'transcribed' | 'embedding' | 'analyzing' | 'completed' | 'failed';
+export const isProcessingStatus = (status?: MeetingStatus | null) =>
+  status === 'queued' || status === 'processing' || status === 'transcribing' ||
+  status === 'transcribed' || status === 'embedding' || status === 'analyzing';
 
 export interface TaskItem {
   id: string;
@@ -61,10 +64,12 @@ export interface Meeting {
 }
 
 export interface ApiWorkspace {
+  current_role?: 'owner' | 'admin' | 'member';
   id: string;
   name: string;
   owner_id: string;
   created_at: string;
+  is_demo?: boolean;
 }
 
 export interface ApiWorkspaceMember {
@@ -87,6 +92,7 @@ export interface ApiAuthSession {
 }
 
 export interface ApiMeetingListItem {
+  created_by?: string | null;
   id: string;
   title: string;
   status: MeetingStatus;
@@ -94,6 +100,7 @@ export interface ApiMeetingListItem {
   native_meeting_id?: string | null;
   duration_seconds?: number | null;
   created_at: string;
+  retry_count?: number;
   participants: Array<{
     name: string;
     avatar_url?: string | null;
@@ -102,14 +109,25 @@ export interface ApiMeetingListItem {
 }
 
 export interface ApiMeetingDetail extends ApiMeetingListItem {
+  workspace_id: string;
+  language_code?: string | null;
+  language_name?: string | null;
+  transcription_language?: string | null;
+  display_script?: 'original' | 'romanized';
+  capture_failure_reason?: string | null;
   audio_url?: string | null;
   failure_reason?: string | null;
+  processing_updated_at?: string | null;
+  retry_available?: boolean;
 }
 
 export interface ApiMeetingSummary {
   overview?: string | null;
   key_takeaways: string[];
   next_steps: string[];
+  executive_sections?: Record<string, { text: string; speaker: string; timestamp: string; source_quote: string; source_segment_id: string }[]> | null;
+  ai_model?: string | null;
+  prompt_version?: string | null;
 }
 
 export interface ApiTranscriptSegment {
@@ -121,6 +139,7 @@ export interface ApiTranscriptSegment {
 }
 
 export interface ApiTask {
+  assignee_id?: string | null;
   id: string;
   meeting_id: string;
   title: string;
@@ -129,6 +148,10 @@ export interface ApiTask {
   priority: TaskPriority;
   status: TaskStatus;
   transcript_timestamp?: string | null;
+  source_segment_id?: string | null;
+  source_speaker?: string | null;
+  source_quote?: string | null;
+  ai_model?: string | null;
   created_at?: string;
 }
 
@@ -138,6 +161,10 @@ export interface ApiDecision {
   topic: string;
   outcome: string;
   transcript_timestamp?: string | null;
+  source_segment_id?: string | null;
+  source_speaker?: string | null;
+  source_quote?: string | null;
+  ai_model?: string | null;
   created_at?: string;
 }
 
@@ -231,7 +258,7 @@ export interface ApiKnowledgeDocument {
 }
 
 export interface ApiKnowledgeCitation {
-  type: 'document' | 'meeting';
+  type: 'document' | 'meeting' | 'task' | 'decision';
   title: string;
   document_id?: string | null;
   meeting_id?: string | null;
