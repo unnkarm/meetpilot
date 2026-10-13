@@ -38,6 +38,9 @@ class Meeting(Base):
     is_multilingual: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     status: Mapped[MeetingStatus] = mapped_column(Enum(MeetingStatus), default=MeetingStatus.queued, nullable=False)
     failure_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    capture_failure_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    transcription_language: Mapped[str | None] = mapped_column(String(12), nullable=True, default="en")
+    display_script: Mapped[str] = mapped_column(String(16), nullable=False, default="original", server_default="original")
     processing_updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     retry_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     created_by: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
@@ -92,6 +95,7 @@ class MeetingParticipant(Base):
     provider_email: Mapped[str | None] = mapped_column(String(255), nullable=True)
     email_verified: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     identity_confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
+    identity_verified_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True)
 
     meeting = relationship("Meeting", back_populates="participants")
 
