@@ -1,5 +1,6 @@
 import os
 from functools import lru_cache
+from pydantic import SecretStr
 from app.core.app_config import APP_CONFIG
 
 try:
@@ -18,6 +19,8 @@ except ImportError:
                             setattr(self, field, int(env_val))
                         elif f_type is bool:
                             setattr(self, field, env_val.lower() in ("true", "1", "yes"))
+                        elif f_type is SecretStr:
+                            setattr(self, field, SecretStr(env_val))
                         else:
                             setattr(self, field, env_val)
                     except Exception:
@@ -28,6 +31,14 @@ except ImportError:
 
 
 class Settings(BaseSettings):
+    # Public policy details only. Publication requires completing every disclosure.
+    LEGAL_POLICIES_PUBLISHED: bool = False
+    LEGAL_OPERATOR_NAME: str = ""
+    LEGAL_OPERATOR_ADDRESS: str = ""
+    LEGAL_PRIVACY_EMAIL: str = ""
+    LEGAL_JURISDICTION: str = ""
+    LEGAL_PROCESSING_DISCLOSURE: str = ""
+    LEGAL_RETENTION_DISCLOSURE: str = ""
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
     # Database
@@ -57,6 +68,9 @@ class Settings(BaseSettings):
     CLERK_SECRET_KEY: str = ""
     CLERK_JWKS_URL: str = ""
     CLERK_ISSUER_URL: str = ""
+
+    # Server-side inference credentials. Provider selection remains in app_config.
+    OPENAI_API_KEY: SecretStr = SecretStr("")
 
 
     # Gemini & AI Configuration (Configurable Quotas & Models)

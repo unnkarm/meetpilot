@@ -7,7 +7,7 @@ try:
         "meetpilot",
         broker=settings.CELERY_BROKER_URL,
         backend=settings.CELERY_RESULT_BACKEND,
-        include=["app.workers.meeting_processor", "app.workers.meeting_bot", "app.workers.vexa_meeting"],
+        include=["app.workers.meeting_processor", "app.workers.meeting_bot", "app.workers.vexa_meeting", "app.workers.meeting_review"],
     )
 except ImportError:
     from unittest.mock import MagicMock
