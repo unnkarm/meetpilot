@@ -17,7 +17,7 @@ from app.services.embedding_provider import embed_texts
 def reindex_embeddings() -> dict[str, int]:
     counts: dict[str, int] = {}
     batch_size = APP_CONFIG.embeddings.batch_size
-    model_name = APP_CONFIG.embeddings.model
+    model_name = APP_CONFIG.embeddings.index_key
     with SessionLocal() as db:
         for model in (TranscriptSegment, DocumentChunk):
             count = 0
