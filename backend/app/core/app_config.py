@@ -7,15 +7,39 @@ environment variables; credentials remain in ``core.config``.
 import os
 from dataclasses import dataclass, field
 
+from dotenv import load_dotenv
+
+# Read the same working-directory .env as Settings, without overriding hosted
+# environment variables. Otherwise provider choices in backend/.env are ignored
+# when running Python directly rather than through Docker's env_file.
+load_dotenv(dotenv_path=".env", override=False)
+
 
 def _env_flag(name: str, default: bool) -> bool:
     return os.getenv(name, str(default)).strip().lower() in {"1", "true", "yes", "on"}
 
 
+def _provider(name: str) -> str:
+    return os.getenv(name, "ollama").strip().lower()
+
+
+def _chat_model() -> str:
+    if _provider("AI_PROVIDER") == "openai":
+        # Choose an account-available model explicitly when enabling paid API use.
+        return os.getenv("OPENAI_CHAT_MODEL", "").strip()
+    return os.getenv("OLLAMA_CHAT_MODEL", "qwen3:4b-instruct").strip()
+
+
+def _embedding_model() -> str:
+    if _provider("EMBEDDING_PROVIDER") == "openai":
+        return os.getenv("OPENAI_EMBEDDING_MODEL", "text-embedding-3-small").strip()
+    return os.getenv("OLLAMA_EMBEDDING_MODEL", "nomic-embed-text-v2-moe").strip()
+
+
 @dataclass(frozen=True)
 class AIConfig:
-    provider: str = field(default_factory=lambda: os.getenv("AI_PROVIDER", "ollama"))
-    model: str = field(default_factory=lambda: os.getenv("OLLAMA_CHAT_MODEL", "qwen3:4b-instruct"))
+    provider: str = field(default_factory=lambda: _provider("AI_PROVIDER"))
+    model: str = field(default_factory=_chat_model)
     temperature: float = 0.2
     max_tokens: int = 2048
     context_tokens: int = 8192
@@ -28,13 +52,21 @@ class AIConfig:
 
 @dataclass(frozen=True)
 class EmbeddingConfig:
-    provider: str = field(default_factory=lambda: os.getenv("EMBEDDING_PROVIDER", "ollama"))
-    model: str = field(default_factory=lambda: os.getenv("OLLAMA_EMBEDDING_MODEL", "nomic-embed-text-v2-moe"))
+    provider: str = field(default_factory=lambda: _provider("EMBEDDING_PROVIDER"))
+    model: str = field(default_factory=_embedding_model)
     dimensions: int = 768  # Existing pgvector schema. Changing this needs a migration and reindex.
     query_prefix: str = field(default_factory=lambda: os.getenv("EMBEDDING_QUERY_PREFIX", "search_query: "))
     document_prefix: str = field(default_factory=lambda: os.getenv("EMBEDDING_DOCUMENT_PREFIX", "search_document: "))
     batch_size: int = 16
     enabled: bool = True
+
+    @property
+    def index_key(self) -> str:
+        # Preserve existing Ollama indexes. Cloud vectors occupy a separate
+        # model/dimension namespace even if a local model uses the same name.
+        if self.provider == "ollama":
+            return self.model
+        return f"{self.provider}:{self.model}:{self.dimensions}"
 
 
 @dataclass(frozen=True)
@@ -103,9 +135,11 @@ class PilotPhase1Config:
     tts_enabled: bool = field(default_factory=lambda: _env_flag("PILOT_TTS_ENABLED", True))
     session_ttl_seconds: int = 3600
     vad_rms_threshold: int = 350
-    silence_end_ms: int = 700
-    partial_interval_ms: int = 2200
-    max_utterance_ms: int = 15000
+    silence_end_ms: int = field(default_factory=lambda: max(300, min(2000, int(os.getenv("PILOT_SILENCE_END_MS", "700")))))
+    pre_roll_ms: int = 200
+    first_partial_ms: int = 600
+    partial_interval_ms: int = 1200
+    max_utterance_ms: int = 30000
     audio_sample_rate: int = 16000
 
 
