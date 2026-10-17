@@ -11,7 +11,10 @@ from app.models.meeting import Meeting, MeetingStatus
 from app.models.task import Task, TaskStatus
 from app.models.transcript import TranscriptSegment
 from app.models.user import User
-from app.models.workspace import Workspace, WorkspaceMember, WorkspaceRole
+from app.models.workspace import Workspace, WorkspaceMember, WorkspaceRole, WorkspaceJoinRequest
+from app.services.access_control import require_manager, lock_workspace_manager, task_visibility
+from app.services.workspace_join import rotate_join_code, disable_join_code, submit_join_request, review_join_request
+from app.schemas.workspace import WorkspaceJoinRequestIn, WorkspaceJoinRequestOut, WorkspaceJoinReview
 from app.schemas.workspace import (
     SpeakerAirtimeItem,
     WorkspaceAnalyticsOut,
@@ -29,6 +32,59 @@ from app.services.product_events import track_event
 router = APIRouter(prefix="/api/v1/workspaces", tags=["workspaces"])
 
 
+def _workspace_out(workspace, db, user_id):
+    member = db.get(WorkspaceMember, (workspace.id, user_id))
+    return WorkspaceOut(**WorkspaceOut.model_validate(workspace).model_dump(exclude={"current_role"}),
+                        current_role=member.role if member else WorkspaceRole.member)
+
+
+def _join_out(request, db):
+    user = db.get(User, request.user_id)
+    workspace = db.get(Workspace, request.workspace_id)
+    access_status = request.status
+    if access_status == "approved" and db.get(WorkspaceMember, (request.workspace_id, request.user_id), populate_existing=True) is None:
+        access_status = "removed"
+    return WorkspaceJoinRequestOut(id=request.id, workspace_id=request.workspace_id,
+        workspace_name=workspace.name, user_id=user.id, name=user.name, email=user.email, email_verified=user.email_verified,
+        status=access_status, created_at=request.created_at)
+
+
+@router.post("/join", response_model=WorkspaceJoinRequestOut, status_code=201)
+def request_workspace_access(payload: WorkspaceJoinRequestIn,
+                             user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    return _join_out(submit_join_request(db, payload.code, user.id), db)
+
+
+@router.get("/join-requests", response_model=list[WorkspaceJoinRequestOut])
+def my_join_requests(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    rows = db.query(WorkspaceJoinRequest).filter(WorkspaceJoinRequest.user_id == user.id).order_by(WorkspaceJoinRequest.created_at.desc()).all()
+    return [_join_out(row, db) for row in rows]
+
+
+@router.post("/{workspace_id}/join-code")
+def generate_join_code(workspace_id: uuid.UUID, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    return rotate_join_code(db, workspace_id, user.id)
+
+
+@router.delete("/{workspace_id}/join-code", status_code=204)
+def revoke_join_code(workspace_id: uuid.UUID, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    disable_join_code(db, workspace_id, user.id)
+
+
+@router.get("/{workspace_id}/join-requests", response_model=list[WorkspaceJoinRequestOut])
+def pending_join_requests(workspace_id: uuid.UUID, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    require_manager(db, workspace_id, user.id)
+    rows = db.query(WorkspaceJoinRequest).filter(WorkspaceJoinRequest.workspace_id == workspace_id,
+        WorkspaceJoinRequest.status == "pending").order_by(WorkspaceJoinRequest.created_at).all()
+    return [_join_out(row, db) for row in rows]
+
+
+@router.post("/{workspace_id}/join-requests/{request_id}/review", response_model=WorkspaceJoinRequestOut)
+def review_workspace_access(workspace_id: uuid.UUID, request_id: uuid.UUID, payload: WorkspaceJoinReview,
+                             user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    return _join_out(review_join_request(db, workspace_id, request_id, user.id, payload.decision), db)
+
+
 @router.post("", response_model=WorkspaceOut, status_code=status.HTTP_201_CREATED)
 def create_workspace(
     payload: WorkspaceCreate,
@@ -44,7 +100,7 @@ def create_workspace(
     track_event(db, "workspace_created", current_user.id, workspace.id)
     db.commit()
     db.refresh(workspace)
-    return workspace
+    return _workspace_out(workspace, db, current_user.id)
 
 
 @router.post("/demo", response_model=WorkspaceOut, status_code=status.HTTP_201_CREATED)
@@ -53,7 +109,7 @@ def explore_demo(
     db: Session = Depends(get_db),
 ) -> Workspace:
     """Create or return this user's isolated sample workspace."""
-    return create_demo_workspace(db, current_user)
+    return _workspace_out(create_demo_workspace(db, current_user), db, current_user.id)
 
 
 @router.get("", response_model=list[WorkspaceOut])
@@ -64,7 +120,7 @@ def list_workspaces(
     ids = get_user_workspace_ids(current_user, db)
     if not ids:
         return []
-    return db.query(Workspace).filter(Workspace.id.in_(ids)).all()
+    return [_workspace_out(ws, db, current_user.id) for ws in db.query(Workspace).filter(Workspace.id.in_(ids)).all()]
 
 
 @router.patch("/{workspace_id}", response_model=WorkspaceOut)
@@ -84,7 +140,7 @@ def update_workspace(
         db.commit()
         db.refresh(workspace)
 
-    return workspace
+    return _workspace_out(workspace, db, _membership.user_id)
 
 
 @router.post(
@@ -98,12 +154,20 @@ def invite_member(
     db: Session = Depends(get_db),
     _membership=Depends(require_role(WorkspaceRole.owner, WorkspaceRole.admin)),
 ) -> WorkspaceMemberOut:
-    invitee = db.query(User).filter(User.email == payload.email).first()
-    if invitee is None:
+    _, _membership = lock_workspace_manager(db, workspace_id, _membership.user_id)
+    if payload.role == WorkspaceRole.owner or (payload.role == WorkspaceRole.admin and _membership.role != WorkspaceRole.owner):
+        raise HTTPException(status_code=403, detail="Only the owner may appoint managers; ownership cannot be assigned here")
+    invitees = db.query(User).filter(func.lower(User.email) == payload.email.strip().casefold()).all()
+    if not invitees:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="No registered user with that email yet. Ask them to sign up first.",
         )
+    if len(invitees) > 1:
+        raise HTTPException(status_code=409, detail="Multiple accounts match that email. Ask the person to request access with a join code")
+    invitee = invitees[0]
+    if not invitee.email_verified:
+        raise HTTPException(status_code=422, detail="Email invitations require a verified account email. Ask the user to request access with a join code instead")
 
     existing = db.get(WorkspaceMember, (workspace_id, invitee.id))
     if existing:
@@ -145,9 +209,15 @@ def update_member_role(
     db: Session = Depends(get_db),
     _membership=Depends(require_role(WorkspaceRole.owner, WorkspaceRole.admin)),
 ) -> WorkspaceMemberOut:
+    workspace, _membership = lock_workspace_manager(db, workspace_id, _membership.user_id)
     member = db.get(WorkspaceMember, (workspace_id, user_id))
     if member is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Member not found")
+
+    if user_id == workspace.owner_id or payload.role == WorkspaceRole.owner:
+        raise HTTPException(status_code=403, detail="Workspace ownership cannot be changed through member roles")
+    if _membership.role != WorkspaceRole.owner and (member.role == WorkspaceRole.admin or payload.role == WorkspaceRole.admin):
+        raise HTTPException(status_code=403, detail="Only the owner may change manager roles")
 
     member.role = payload.role
     db.commit()
@@ -165,10 +235,7 @@ def remove_member(
     _membership=Depends(require_role(WorkspaceRole.owner, WorkspaceRole.admin)),
 ):
     """Removes a user membership from the workspace. Restricted to workspace owner or admin."""
-    workspace = db.get(Workspace, workspace_id)
-    if workspace is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Workspace not found")
-
+    workspace, _membership = lock_workspace_manager(db, workspace_id, current_user.id)
     if workspace.owner_id == user_id:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -178,6 +245,9 @@ def remove_member(
     member = db.get(WorkspaceMember, (workspace_id, user_id))
     if member is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Member not found in workspace")
+
+    if member.role == WorkspaceRole.admin and _membership.role != WorkspaceRole.owner:
+        raise HTTPException(status_code=403, detail="Only the owner may remove a manager")
 
     db.delete(member)
     db.commit()
@@ -220,7 +290,7 @@ def get_workspace_analytics(
     tasks = (
         db.query(Task)
         .join(Meeting, Meeting.id == Task.meeting_id)
-        .filter(Meeting.workspace_id == workspace_id)
+        .filter(Meeting.workspace_id == workspace_id, task_visibility(_membership.user_id))
         .all()
     )
     total_tasks = len(tasks)
@@ -289,9 +359,9 @@ def delete_workspace(
     _membership=Depends(require_role(WorkspaceRole.owner)),
 ):
     """Deletes a workspace, its meetings, audio recordings, and member associations. Restricted to workspace owner."""
-    workspace = db.get(Workspace, workspace_id)
-    if workspace is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Workspace not found")
+    workspace, _membership = lock_workspace_manager(db, workspace_id, _membership.user_id)
+    if workspace.owner_id != _membership.user_id:
+        raise HTTPException(status_code=403, detail="Only the registered workspace owner may delete it")
 
     audio_urls = [meeting.audio_url for meeting in workspace.meetings if meeting.audio_url and meeting.audio_url.startswith("local://")]
     db.delete(workspace)
