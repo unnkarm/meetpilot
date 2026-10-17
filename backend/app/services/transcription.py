@@ -114,19 +114,19 @@ def build_diarization_prompt(known_speakers: list[str]) -> str:
     return base
 
 
-def _transcribe_local_audio(audio_path: Path) -> TranscriptionResult:
+def _transcribe_local_audio(audio_path: Path, language_hint: str | None = None) -> TranscriptionResult:
     """Run real local Whisper ASR. Unknown speaker identity is labelled conservatively."""
+    cfg = APP_CONFIG.transcription
+    if cfg.model.endswith(".en") and APP_CONFIG.language.multilingual_transcription:
+        raise RuntimeError("The configured Whisper checkpoint is English-only; select a multilingual checkpoint")
     try:
         from faster_whisper import WhisperModel
     except ImportError as exc:
         raise RuntimeError("Local transcription requires faster-whisper") from exc
 
-    cfg = APP_CONFIG.transcription
-    if cfg.model.endswith(".en") and APP_CONFIG.language.multilingual_transcription:
-        raise RuntimeError("The configured Whisper checkpoint is English-only; select a multilingual checkpoint")
-    language_hint = APP_CONFIG.language.default_language
+    language_hint = language_hint or APP_CONFIG.language.default_language
     language_hint = None if language_hint == "auto" else language_hint
-    model = WhisperModel(cfg.model, device=cfg.device, compute_type=cfg.compute_type)
+    model = WhisperModel(cfg.model, device=cfg.device, compute_type=cfg.compute_type, local_files_only=True)
     chunks = split_audio(
         audio_path,
         meeting_id=audio_path.stem,
@@ -170,7 +170,7 @@ def _transcribe_local_audio(audio_path: Path) -> TranscriptionResult:
     )
 
 
-def _transcribe_hf_space(audio_path: Path, meeting_id: str) -> TranscriptionResult:
+def _transcribe_hf_space(audio_path: Path, meeting_id: str, language_hint: str | None = None) -> TranscriptionResult:
     """Transcribes audio via Hugging Face ZeroGPU Gradio Space (faster-whisper + pyannote diarization).
 
     Supports direct single-pass audio requests or chunked execution for extra-long recordings.
@@ -207,7 +207,7 @@ def _transcribe_hf_space(audio_path: Path, meeting_id: str) -> TranscriptionResu
                 audio_file=handle_file(str(chunk_path)),
                 min_speakers=None,
                 max_speakers=None,
-                language=None if APP_CONFIG.language.default_language == "auto" else APP_CONFIG.language.default_language,
+                language=None if (language_hint or APP_CONFIG.language.default_language) == "auto" else (language_hint or APP_CONFIG.language.default_language),
                 api_name="/transcribe",
             )
 
@@ -307,14 +307,14 @@ def _transcribe_gemini(audio_path: Path, meeting_id: str) -> TranscriptionResult
 
 class LocalWhisperProvider(TranscriptionProvider):
     def transcribe(self, audio_path: Path, meeting_id: str) -> TranscriptionResult:
-        return _transcribe_local_audio(audio_path)
+        return _transcribe_local_audio(audio_path, getattr(self, "language_hint", None))
 
 
 class HuggingFaceDiarizationProvider(TranscriptionProvider):
     supports_diarization = True
 
     def transcribe(self, audio_path: Path, meeting_id: str) -> TranscriptionResult:
-        return _transcribe_hf_space(audio_path, meeting_id)
+        return _transcribe_hf_space(audio_path, meeting_id, getattr(self, "language_hint", None))
 
 
 class GeminiTranscriptionProvider(TranscriptionProvider):
@@ -338,10 +338,14 @@ def get_transcription_provider() -> TranscriptionProvider:
         raise RuntimeError(f"Unsupported transcription provider: {APP_CONFIG.transcription.provider}") from exc
 
 
-def transcribe_audio_with_metadata(audio_path: Path, meeting_id: str | None = None) -> TranscriptionResult:
+def transcribe_audio_with_metadata(audio_path: Path, meeting_id: str | None = None, language_hint: str | None = None) -> TranscriptionResult:
     """Transcribe original speech, retaining provider and text language evidence."""
     m_id = meeting_id or audio_path.stem
-    result = get_transcription_provider().transcribe(audio_path, m_id)
+    from app.services.meeting_language import recognition_hint
+    recognition_hint(language_hint)
+    provider = get_transcription_provider()
+    provider.language_hint = language_hint
+    result = provider.transcribe(audio_path, m_id)
     if isinstance(result, list):  # Compatibility with existing provider adapters.
         result = TranscriptionResult(result)
     if not result.segments:
