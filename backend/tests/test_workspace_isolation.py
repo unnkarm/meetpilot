@@ -1,6 +1,7 @@
 import sys
 import unittest
 import uuid
+from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import MagicMock
 
@@ -32,7 +33,7 @@ class TestWorkspaceIsolationAndManagement(unittest.TestCase):
         self.member = User(id=uuid.uuid4(), email="member@meetpilot.ai", name="Teammate")
         self.outsider = User(id=uuid.uuid4(), email="outsider@evil.corp", name="Malicious User")
 
-        self.workspace = Workspace(id=self.workspace_id, name="Core Engineering", owner_id=self.owner.id)
+        self.workspace = Workspace(id=self.workspace_id, name="Core Engineering", owner_id=self.owner.id, is_demo=False, created_at=datetime.now(timezone.utc))
 
         self.meeting = Meeting(
             id=uuid.uuid4(),
@@ -45,7 +46,7 @@ class TestWorkspaceIsolationAndManagement(unittest.TestCase):
     def test_tenant_isolation_blocks_outsider(self):
         """Tests that get_meeting_for_member strictly blocks access for users not in the workspace."""
         mock_db = MagicMock()
-        mock_db.get.side_effect = lambda model, key: {
+        mock_db.get.side_effect = lambda model, key, **kwargs: {
             (Meeting, self.meeting.id): self.meeting,
             (WorkspaceMember, (self.workspace_id, self.outsider.id)): None,
         }.get((model, key))
@@ -59,10 +60,11 @@ class TestWorkspaceIsolationAndManagement(unittest.TestCase):
     def test_workspace_rename_success(self):
         """Tests that authorized owners/admins can rename a workspace."""
         mock_db = MagicMock()
-        mock_db.get.return_value = self.workspace
+        owner_membership = WorkspaceMember(workspace_id=self.workspace_id, user_id=self.owner.id, role=WorkspaceRole.owner)
+        mock_db.get.side_effect = lambda model, key: self.workspace if model is Workspace else owner_membership
 
         payload = WorkspaceUpdate(name="Platform Engineering")
-        updated = update_workspace(self.workspace_id, payload, mock_db)
+        updated = update_workspace(self.workspace_id, payload, mock_db, owner_membership)
 
         self.assertEqual(updated.name, "Platform Engineering")
         mock_db.commit.assert_called_once()
@@ -70,7 +72,9 @@ class TestWorkspaceIsolationAndManagement(unittest.TestCase):
     def test_remove_member_prevents_owner_removal(self):
         """Tests that the workspace owner cannot be removed via member deletion."""
         mock_db = MagicMock()
-        mock_db.get.return_value = self.workspace
+        owner_membership = WorkspaceMember(workspace_id=self.workspace_id, user_id=self.owner.id, role=WorkspaceRole.owner)
+        mock_db.get.side_effect = lambda model, key, **kwargs: self.workspace if model is Workspace else owner_membership
+        mock_db.query.return_value.filter.return_value.with_for_update.return_value.first.return_value = self.workspace
 
         with self.assertRaises(HTTPException) as ctx:
             remove_member(
