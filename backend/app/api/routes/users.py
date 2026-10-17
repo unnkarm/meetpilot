@@ -5,6 +5,9 @@ from app.api.deps import get_current_user
 from app.database.session import get_db
 from app.models.notification import Notification
 from app.models.user import User
+from app.models.workspace import WorkspaceMember
+from app.models.meeting import Meeting
+from sqlalchemy import exists, select, or_
 from app.schemas.notification import NotificationOut
 from app.schemas.user import UserOut
 
@@ -23,7 +26,10 @@ def get_user_notifications(
 ) -> list[Notification]:
     return (
         db.query(Notification)
-        .filter(Notification.user_id == current_user.id)
+        .filter(Notification.user_id == current_user.id,
+                or_(Notification.meeting_id.is_(None), exists(select(Meeting.id).join(
+                    WorkspaceMember, WorkspaceMember.workspace_id == Meeting.workspace_id).where(
+                    Meeting.id == Notification.meeting_id, WorkspaceMember.user_id == current_user.id))))
         .order_by(Notification.created_at.desc())
         .limit(30)
         .all()
