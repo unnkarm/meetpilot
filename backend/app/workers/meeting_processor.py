@@ -26,11 +26,13 @@ from app.services.storage import resolve_local_path
 from app.services.transcript_utils import format_timestamp, segments_to_text
 from app.services.transcription import TranscriptionResult, transcribe_audio_with_metadata
 from app.services.product_events import track_event
+from app.services.meeting_signals import first_person_commitment
+from app.services.pilot_language import script_languages, normalized_text
 
 logger = logging.getLogger(__name__)
 
 
-def _source_segment(value: str | None, segments: list[TranscriptSegment]) -> TranscriptSegment | None:
+def _source_segment(value: str | None, segments: list[TranscriptSegment], source_quote: str | None = None) -> TranscriptSegment | None:
     """Accept evidence only when the model points inside persisted speech."""
     try:
         parts = [int(part) for part in (value or "").split(":")]
@@ -39,18 +41,20 @@ def _source_segment(value: str | None, segments: list[TranscriptSegment]) -> Tra
         return None
     if seconds is None:
         return None
-    for segment in segments:
-        if segment.start_time - 2 <= seconds <= segment.end_time + 2:
-            return segment
-    return None
+    candidates = [segment for segment in segments if segment.start_time - 2 <= seconds <= segment.end_time + 2]
+    if source_quote:
+        # Simultaneous speakers can share a timestamp. A quote must select the
+        # actual speaker, rather than the first overlapping speech turn.
+        candidates = [segment for segment in candidates if _supported_by_source("", segment, source_quote)]
+    return candidates[0] if len(candidates) == 1 or (candidates and not source_quote) else None
 
 
 def _supported_by_source(claim: str, source: TranscriptSegment, source_quote: str | None = None) -> bool:
     """Reject a cited action/topic with no substantive overlap with its speech turn."""
     if source_quote:
-        quote = " ".join(source_quote.casefold().split())
-        speech = " ".join(source.text.casefold().split())
-        speaker_prefix = source.speaker.casefold() + ":"
+        quote = normalized_text(source_quote)
+        speech = normalized_text(source.text)
+        speaker_prefix = normalized_text(source.speaker) + ":"
         if quote.startswith(speaker_prefix):
             quote = quote[len(speaker_prefix):].strip()
         return len(quote) >= 8 and quote in speech
@@ -64,7 +68,7 @@ def _supported_by_source(claim: str, source: TranscriptSegment, source_quote: st
 def _grounded_section(items: list[dict], segments: list[TranscriptSegment]) -> list[dict]:
     result = []
     for item in items:
-        source = _source_segment(item.get("transcript_timestamp"), segments)
+        source = _source_segment(item.get("transcript_timestamp"), segments, item.get("source_quote"))
         quote = item.get("source_quote")
         if source is None or not quote or not _supported_by_source(item.get("text", ""), source, quote):
             continue
@@ -136,6 +140,7 @@ def process_transcript_intelligence(
     meeting.is_multilingual = bool(
         (transcription and transcription.is_multilingual)
         or len({row.language_code for row in segment_rows if row.language_code}) > 1
+        or any(len(script_languages(row.text)) > 1 for row in segment_rows)
     )
     db.commit()
     meeting.status = MeetingStatus.embedding
@@ -144,7 +149,7 @@ def process_transcript_intelligence(
     embeddings = embed_texts([row.text for row in segment_rows])
     for row, embedding in zip(segment_rows, embeddings):
         row.embedding = embedding
-        row.embedding_model = APP_CONFIG.embeddings.model
+        row.embedding_model = APP_CONFIG.embeddings.index_key
     db.commit()
     transcript_text = segments_to_text(segment_rows)
     duration = int(max((s.end_time for s in segment_rows), default=0))
@@ -173,24 +178,17 @@ def process_transcript_intelligence(
                 APP_CONFIG.ai.provider, APP_CONFIG.ai.model)
     insights = generate_meeting_insights(
         transcript_text, participant_names,
-        language_code=meeting.language_code, language_name=meeting.language_name,
+        language_code=(meeting.transcription_language if meeting.transcription_language != "auto" else None) or meeting.language_code,
+        language_name=language_label(meeting.transcription_language) if meeting.transcription_language not in {None, "auto"} else meeting.language_name,
         meeting_date=meeting.created_at.date() if meeting.created_at else None,
     )
-    members = (
-        db.query(User)
-        .join(WorkspaceMember, WorkspaceMember.user_id == User.id)
-        .filter(WorkspaceMember.workspace_id == meeting.workspace_id)
-        .all()
-    )
-    members_by_name = {}
-    for user in members:
-        if user.name:
-            members_by_name.setdefault(user.name.casefold(), []).append(user)
 
-    # Clean up any existing summaries, tasks, or decisions for this meeting to ensure idempotent processing
+    # Rebuild the summary while retaining already captured work and agreements.
+    # A final model pass can omit a live decision; it must not delete it, task
+    # status, verified assignments, or work explicitly created by a manager.
     db.query(MeetingSummary).filter(MeetingSummary.meeting_id == meeting.id).delete()
-    db.query(Task).filter(Task.meeting_id == meeting.id).delete()
-    db.query(Decision).filter(Decision.meeting_id == meeting.id).delete()
+    existing_tasks = db.query(Task).filter(Task.meeting_id == meeting.id).all()
+    existing_decisions = db.query(Decision).filter(Decision.meeting_id == meeting.id).all()
     db.flush()
 
     summary_row = MeetingSummary(
@@ -207,7 +205,7 @@ def process_transcript_intelligence(
 
 
     for t in insights.get("tasks", []):
-        source = _source_segment(t.get("transcript_timestamp"), segment_rows)
+        source = _source_segment(t.get("transcript_timestamp"), segment_rows, t.get("source_quote"))
         if source is None:
             logger.warning("Skipping task without source evidence meeting=%s", meeting.id)
             continue
@@ -219,14 +217,23 @@ def process_transcript_intelligence(
             continue
         priority = t["priority"]
         proposed_name = (t.get("assignee_name") or "").strip()
-        matches = members_by_name.get(proposed_name.casefold(), [])
-        assignee = matches[0] if len(matches) == 1 and proposed_name.casefold() in source.text.casefold() else None
+        same_work = next((row for row in existing_tasks if
+            " ".join(row.title.casefold().split()) == " ".join(t["title"].casefold().split())
+            and (row.assignee_name or "").casefold() == proposed_name.casefold()), None)
+        if same_work is not None:
+            continue
+        # A name in speech is not proof that the workspace account belongs to
+        # that participant. Link only a verified or manager-confirmed identity.
+        from app.services.pilot_phase1 import _verified_participant
+        owner_is_spoken = (proposed_name and (proposed_name.casefold() in source.text.casefold()
+                           or (proposed_name.casefold() == source.speaker.casefold() and first_person_commitment(source.text))))
+        assignee = _verified_participant(db, meeting, proposed_name) if owner_is_spoken else None
         db.add(
             Task(
                 meeting_id=meeting.id,
                 title=t["title"],
                 assignee_id=assignee.id if assignee else None,
-                assignee_name=assignee.name if assignee else None,
+                assignee_name=assignee.name if assignee else proposed_name or None,
                 due_date=t.get("due_date"),
                 priority=TaskPriority(priority),
                 transcript_timestamp=format_timestamp(source.start_time),
@@ -240,7 +247,7 @@ def process_transcript_intelligence(
         )
 
     for d in insights.get("decisions", []):
-        source = _source_segment(d.get("transcript_timestamp"), segment_rows)
+        source = _source_segment(d.get("transcript_timestamp"), segment_rows, d.get("source_quote"))
         if source is None:
             logger.warning("Skipping decision without source evidence meeting=%s", meeting.id)
             continue
@@ -249,6 +256,13 @@ def process_transcript_intelligence(
             continue
         if not _supported_by_source(d["topic"] + " " + d["outcome"], source, d.get("source_quote")):
             logger.warning("Skipping decision unsupported by cited speech meeting=%s segment=%s", meeting.id, source.id)
+            continue
+        quote = " ".join(d["source_quote"].casefold().split())
+        same_decision = next((row for row in existing_decisions if
+            ((row.source_segment_id == source.id and " ".join((row.source_quote or "").casefold().split()) == quote
+              and row.topic.casefold() == d["topic"].casefold())
+             or (row.topic.casefold() == d["topic"].casefold() and row.outcome.casefold() == d["outcome"].casefold()))), None)
+        if same_decision is not None:
             continue
         db.add(
             Decision(
@@ -269,7 +283,7 @@ def process_transcript_intelligence(
         {"text": row.outcome, "speaker": row.source_speaker,
          "timestamp": row.transcript_timestamp, "source_quote": row.source_quote,
          "source_segment_id": str(row.source_segment_id)}
-        for row in db.new if isinstance(row, Decision) and row.meeting_id == meeting.id
+        for row in db.query(Decision).filter(Decision.meeting_id == meeting.id).all()
     ]
     from sqlalchemy.orm.attributes import flag_modified
     flag_modified(summary_row, "executive_sections")
@@ -331,7 +345,7 @@ def process_meeting(self, meeting_id: str) -> None:
 
 
         # 1. Transcription + speaker segmentation with Redis rate limiting & chunking
-        transcription = transcribe_audio_with_metadata(audio_path, meeting_id=str(meeting.id))
+        transcription = transcribe_audio_with_metadata(audio_path, meeting_id=str(meeting.id), language_hint=meeting.transcription_language)
         raw_segments = transcription.segments
         if not raw_segments:
             raise ValueError("Transcription returned no segments")
@@ -433,7 +447,7 @@ def process_live_meeting(self, meeting_id: str) -> None:
         if not raw_segments and meeting.audio_url:
             try:
                 audio_path = resolve_local_path(meeting.audio_url)
-                transcription = transcribe_audio_with_metadata(audio_path, meeting_id=str(meeting.id))
+                transcription = transcribe_audio_with_metadata(audio_path, meeting_id=str(meeting.id), language_hint=meeting.transcription_language)
                 raw_segments = transcription.segments
             except Exception as e:
                 logger.warning("Whisper transcription of live audio failed: %s", e)
