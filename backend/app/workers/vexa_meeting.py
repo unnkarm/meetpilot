@@ -88,9 +88,16 @@ def confirmed_segments(payload: dict) -> list[dict]:
 
 def voice_event(row: dict, kind: str, speaker=None) -> dict:
     speaker = row.get("speaker") or speaker
+    utterance_id = row.get("segment_id")
+    if utterance_id is None:
+        start = next((row.get(key) for key in ("start", "start_time", "absolute_start_time")
+                      if row.get(key) is not None), None)
+        # Absolute timestamps are used by some upstream transcript versions.
+        # Never turn missing fields into one constant ID for the entire call.
+        utterance_id = f"time:{start}" if start is not None else None
     return {"type": kind, "text": str(row.get("text") or "").strip(), "speaker": speaker,
             "language": row.get("language"),
-            "utterance_id": str(row.get("segment_id") or f"{speaker}:{row.get('start', row.get('start_time', ''))}")}
+            "utterance_id": str(utterance_id) if utterance_id is not None else None}
 
 
 def segment_times(row: dict, epoch: float) -> tuple[float, float] | None:
