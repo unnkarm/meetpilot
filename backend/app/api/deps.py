@@ -42,6 +42,7 @@ def get_current_user(
         or clerk_payload.get("primary_email_address")
         or clerk_payload.get("email_address")
     )
+    email_verified = clerk_payload.get("email_verified") is True
     name = (
         clerk_payload.get("name")
         or clerk_payload.get("full_name")
@@ -55,7 +56,7 @@ def get_current_user(
     )
 
     # If verified claims omit profile fields, fetch them from Clerk's authenticated API.
-    if (not email or not name or f"{clerk_id}" in str(email)) and settings.CLERK_SECRET_KEY:
+    if (not email or not name or not email_verified or f"{clerk_id}" in str(email)) and settings.CLERK_SECRET_KEY:
         try:
             import httpx
             res = httpx.get(
@@ -69,9 +70,11 @@ def get_current_user(
                 for e in c_data.get("email_addresses", []):
                     if e.get("id") == primary_id:
                         email = e.get("email_address")
+                        email_verified = (e.get("verification") or {}).get("status") == "verified"
                         break
                 if not email and c_data.get("email_addresses"):
                     email = c_data["email_addresses"][0].get("email_address")
+                    email_verified = (c_data["email_addresses"][0].get("verification") or {}).get("status") == "verified"
                 first = c_data.get("first_name") or ""
                 last = c_data.get("last_name") or ""
                 full = f"{first} {last}".strip()
@@ -93,10 +96,13 @@ def get_current_user(
     # The verified subject is the account key. An email may link a legacy user only
     # when it came from verified claims or Clerk's server API and is not already bound.
     user = db.query(User).filter(User.clerk_id == clerk_id).first()
-    if user is None and email and not email.endswith("@clerk.user"):
+    if user is None and email_verified and email and not email.endswith("@clerk.user"):
         user = db.query(User).filter(User.email == email, User.clerk_id.is_(None)).first()
     if user:
         updated = False
+        if user.email_verified != email_verified:
+            user.email_verified = email_verified
+            updated = True
         if user.clerk_id != clerk_id:
             user.clerk_id = clerk_id
             updated = True
@@ -130,6 +136,7 @@ def get_current_user(
             clerk_id=clerk_id,
             name=name,
             email=email,
+            email_verified=email_verified,
             avatar_url=avatar_url,
         )
         db.add(new_user)
@@ -163,7 +170,7 @@ def get_workspace_member(
     db: Session = Depends(get_db),
 ) -> WorkspaceMember:
     """Ensures the current user belongs to the given workspace, returning their membership."""
-    membership = db.get(WorkspaceMember, (workspace_id, current_user.id))
+    membership = db.get(WorkspaceMember, (workspace_id, current_user.id), populate_existing=True)
     if membership is None:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not a member of this workspace")
     return membership
@@ -191,7 +198,7 @@ def get_meeting_for_member(meeting_id: uuid.UUID, current_user: User, db: Sessio
     if meeting is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Meeting not found")
 
-    membership = db.get(WorkspaceMember, (meeting.workspace_id, current_user.id))
+    membership = db.get(WorkspaceMember, (meeting.workspace_id, current_user.id), populate_existing=True)
     if membership is None:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not a member of this meeting's workspace")
 
