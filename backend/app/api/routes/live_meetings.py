@@ -24,6 +24,7 @@ from app.workers.meeting_processor import process_live_meeting
 from app.core.config import settings
 from app.services.meeting_language import display_script
 from app.services.access_control import require_meeting_control
+from app.services.legal_policies import require_policy_acceptance, record_capture_policy
 
 logger = logging.getLogger(__name__)
 
@@ -64,6 +65,8 @@ async def start_live_meeting(
             detail="You are not a member of this workspace",
         )
 
+    require_policy_acceptance(db, current_user.id)
+
     try:
         script = display_script(payload.transcription_language, payload.display_script)
     except ValueError as exc:
@@ -94,6 +97,7 @@ async def start_live_meeting(
     )
     db.add(meeting)
     db.flush()
+    record_capture_policy(db, current_user.id, payload.workspace_id, meeting.id, "live")
 
     # Tag user as participant
     db.add(
@@ -120,7 +124,7 @@ async def start_live_meeting(
         raise HTTPException(status_code=503, detail="Vexa bridge worker is unavailable") from exc
 
     base = _to_list_item(meeting)
-    return MeetingDetail(**base.model_dump(), audio_url=meeting.audio_url, failure_reason=meeting.failure_reason,
+    return MeetingDetail(**base.model_dump(), workspace_id=meeting.workspace_id, audio_url=meeting.audio_url, failure_reason=meeting.failure_reason,
                          capture_failure_reason=meeting.capture_failure_reason,
                          transcription_language=meeting.transcription_language, display_script=meeting.display_script,
                          language_code=meeting.language_code, language_name=meeting.language_name,
@@ -148,7 +152,7 @@ def stop_live_meeting(
     process_live_meeting.apply_async(args=[str(meeting.id)], countdown=120)
 
     base = _to_list_item(meeting)
-    return MeetingDetail(**base.model_dump(), audio_url=meeting.audio_url, failure_reason=meeting.failure_reason,
+    return MeetingDetail(**base.model_dump(), workspace_id=meeting.workspace_id, audio_url=meeting.audio_url, failure_reason=meeting.failure_reason,
                          capture_failure_reason=meeting.capture_failure_reason,
                          transcription_language=meeting.transcription_language, display_script=meeting.display_script,
                          language_code=meeting.language_code, language_name=meeting.language_name,
