@@ -1,4 +1,5 @@
 import json
+import httpx
 import uuid
 from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -188,7 +189,10 @@ def google_auth_url(
     db: Session = Depends(get_db),
 ):
     _require_workspace_role(workspace_id, current_user, db, [WorkspaceRole.owner, WorkspaceRole.admin])
-    url = get_google_auth_url(workspace_id, redirect_uri)
+    try:
+        url = get_google_auth_url(workspace_id, redirect_uri)
+    except ValueError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
     return {"url": url}
 
 
@@ -199,7 +203,10 @@ def google_oauth_callback(
     db: Session = Depends(get_db),
 ) -> IntegrationOut:
     _require_workspace_role(payload.workspace_id, current_user, db, [WorkspaceRole.owner, WorkspaceRole.admin])
-    integration = exchange_google_code(db, payload.workspace_id, payload.code, payload.redirect_uri)
+    try:
+        integration = exchange_google_code(db, payload.workspace_id, payload.code, payload.redirect_uri)
+    except (ValueError, httpx.HTTPError) as exc:
+        raise HTTPException(status_code=502, detail="Google authorization could not be completed. Check server configuration and reconnect.") from exc
     return IntegrationOut(
         provider="google_calendar",
         is_connected=integration.is_connected,
@@ -218,7 +225,10 @@ def zoom_auth_url(
     db: Session = Depends(get_db),
 ):
     _require_workspace_role(workspace_id, current_user, db, [WorkspaceRole.owner, WorkspaceRole.admin])
-    url = get_zoom_auth_url(workspace_id, redirect_uri)
+    try:
+        url = get_zoom_auth_url(workspace_id, redirect_uri)
+    except ValueError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
     return {"url": url}
 
 
@@ -229,7 +239,10 @@ def zoom_oauth_callback(
     db: Session = Depends(get_db),
 ) -> IntegrationOut:
     _require_workspace_role(payload.workspace_id, current_user, db, [WorkspaceRole.owner, WorkspaceRole.admin])
-    integration = exchange_zoom_code(db, payload.workspace_id, payload.code, payload.redirect_uri)
+    try:
+        integration = exchange_zoom_code(db, payload.workspace_id, payload.code, payload.redirect_uri)
+    except (ValueError, httpx.HTTPError) as exc:
+        raise HTTPException(status_code=502, detail="Zoom authorization could not be completed. Check server configuration and reconnect.") from exc
     return IntegrationOut(
         provider="zoom",
         is_connected=integration.is_connected,
@@ -244,7 +257,7 @@ def get_zoom_recordings(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    _require_workspace_role(workspace_id, current_user, db)
+    _require_workspace_role(workspace_id, current_user, db, [WorkspaceRole.owner, WorkspaceRole.admin])
     recordings = list_zoom_cloud_recordings(db, workspace_id)
     return recordings
 
@@ -256,7 +269,7 @@ def import_zoom_recording_endpoint(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    _require_workspace_role(workspace_id, current_user, db)
+    _require_workspace_role(workspace_id, current_user, db, [WorkspaceRole.owner, WorkspaceRole.admin])
     meeting = import_zoom_cloud_recording(
         db=db,
         workspace_id=workspace_id,
