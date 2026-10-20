@@ -44,6 +44,10 @@ class PilotSession:
     current_language: str | None = None
     current_context: dict = field(default_factory=dict)
     last_queries: list[str] = field(default_factory=list)
+    # Brief dialogue references only. Later answers must ground their facts in
+    # fresh retrieved evidence, and history must never cross participants.
+    conversation_history: list[dict] = field(default_factory=list)
+    dialogue_speaker: str | None = None
     last_tool_results: list[dict] = field(default_factory=list)
     created_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
     updated_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
