@@ -1,4 +1,5 @@
 import useSWR from 'swr';
+import { ensurePolicyAcceptance, requiresPolicyAcceptance } from './legalConsent';
 import {
   ApiAuthSession,
   ApiChatMessage,
@@ -34,6 +35,7 @@ export async function apiFetch<T>(
   options: RequestInit = {},
   getToken?: () => Promise<string | null>
 ): Promise<T> {
+  if (requiresPolicyAcceptance(endpoint, options.method)) await ensurePolicyAcceptance();
   const headers = new Headers(options.headers || {});
 
   if (getToken) {
