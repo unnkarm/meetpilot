@@ -1,14 +1,36 @@
 <!doctype html>
-<html lang="en" class="dark">
+<html lang="en" data-theme="dark" data-palette="indigo">
   <head>
     <meta charset="UTF-8" />
+    <meta name="description" content="Turn team conversations into clear decisions, action items and searchable workspace knowledge with MeetPilot." />
+    <meta name="theme-color" content="#090b10" />
+    <script>
+      // Apply the saved appearance before React/CSS loads to avoid a light flash.
+      (() => {
+        let preference = 'dark', palette = 'indigo';
+        try {
+          preference = localStorage.getItem('meetpilot:theme') || 'dark';
+          palette = localStorage.getItem('meetpilot:palette') || 'indigo';
+        } catch {}
+        if (!['light', 'dark', 'system'].includes(preference)) preference = 'dark';
+        if (!['indigo', 'blue', 'teal', 'rose', 'amber'].includes(palette)) palette = 'indigo';
+        const theme = preference === 'system' ? (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light') : preference;
+        document.documentElement.dataset.theme = theme;
+        document.documentElement.dataset.palette = palette;
+        document.documentElement.style.colorScheme = theme;
+        const accents = {indigo: '#6640d8', blue: '#2362c6', teal: '#176b5e', rose: '#ac3469', amber: '#8a580b'};
+        document.querySelector('meta[name="theme-color"]').setAttribute('content', theme === 'dark' ? '#090b10' : accents[palette]);
+      })();
+    </script>
+    <style>html { background: #f5f1e8; } html[data-theme="dark"] { background: #090b10; }</style>
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>MeetPilot AI — AI Meeting Intelligence Platform</title>
+    <title>MeetPilot AI &mdash; Meeting Intelligence</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;650;700&display=swap" rel="stylesheet">
   </head>
-  <body class="bg-[#08090e] text-slate-100 antialiased font-sans selection:bg-indigo-500/30 selection:text-indigo-200">
+  <body>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
