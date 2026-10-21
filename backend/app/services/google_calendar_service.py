@@ -26,7 +26,11 @@ GOOGLE_SCOPES = [
 
 def get_google_auth_url(workspace_id: uuid.UUID, redirect_uri: str | None = None) -> str:
     """Constructs the Google OAuth 2.0 authorization URL for offline calendar access."""
-    client_id = settings.GOOGLE_CLIENT_ID or "mock-google-client-id.apps.googleusercontent.com"
+    client_id = settings.GOOGLE_CLIENT_ID
+    if not client_id or not settings.GOOGLE_CLIENT_SECRET:
+        raise ValueError("Google integration is not configured on this server")
+    if redirect_uri and redirect_uri != settings.GOOGLE_REDIRECT_URI:
+        raise ValueError("The callback URL must match the configured integration redirect URI")
     r_uri = redirect_uri or settings.GOOGLE_REDIRECT_URI
 
     params = {
@@ -47,6 +51,10 @@ def exchange_google_code(
     """Exchanges an authorization code for access and refresh tokens, encrypting them at rest."""
     client_id = settings.GOOGLE_CLIENT_ID
     client_secret = settings.GOOGLE_CLIENT_SECRET
+    if not client_id or not settings.GOOGLE_CLIENT_SECRET:
+        raise ValueError("Google integration is not configured on this server")
+    if redirect_uri and redirect_uri != settings.GOOGLE_REDIRECT_URI:
+        raise ValueError("The callback URL must match the configured integration redirect URI")
     r_uri = redirect_uri or settings.GOOGLE_REDIRECT_URI
 
     payload = {
@@ -57,35 +65,23 @@ def exchange_google_code(
         "grant_type": "authorization_code",
     }
 
-    email = "connected-account@gmail.com"
+    resp = httpx.post(GOOGLE_TOKEN_URL, data=payload, timeout=15.0)
+    resp.raise_for_status()
+    data = resp.json()
+    if not data.get("access_token"):
+        raise ValueError("Google did not return an access token")
     tokens = {
-        "access_token": "mock-google-access-token",
-        "refresh_token": "mock-google-refresh-token",
-        "expires_in": 3600,
+        "access_token": data["access_token"],
+        "refresh_token": data.get("refresh_token"),
+        "expires_in": data.get("expires_in", 3600),
         "created_at": datetime.datetime.utcnow().isoformat(),
     }
-
-    if client_id and client_secret:
-        try:
-            resp = httpx.post(GOOGLE_TOKEN_URL, data=payload, timeout=15.0)
-            if resp.status_code == 200:
-                data = resp.json()
-                tokens = {
-                    "access_token": data.get("access_token"),
-                    "refresh_token": data.get("refresh_token") or tokens["refresh_token"],
-                    "expires_in": data.get("expires_in", 3600),
-                    "created_at": datetime.datetime.utcnow().isoformat(),
-                }
-                # Fetch user email
-                user_resp = httpx.get(
-                    GOOGLE_USERINFO_URL,
-                    headers={"Authorization": f"Bearer {tokens['access_token']}"},
-                    timeout=10.0,
-                )
-                if user_resp.status_code == 200:
-                    email = user_resp.json().get("email", email)
-        except Exception as exc:
-            logger.error("Failed to exchange Google OAuth code: %s", exc, exc_info=True)
+    user_resp = httpx.get(GOOGLE_USERINFO_URL,
+        headers={"Authorization": f"Bearer {tokens['access_token']}"}, timeout=10.0)
+    user_resp.raise_for_status()
+    email = user_resp.json().get("email")
+    if not email:
+        raise ValueError("Google did not return the connected account email")
 
     encrypted_data = encrypt_secret(json.dumps(tokens))
     masked_email = mask_secret(email, "google_calendar")
