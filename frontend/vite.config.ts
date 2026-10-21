@@ -17,7 +17,10 @@ export default defineConfig(() => {
       // Do not modifyâfile watching is disabled to prevent flickering during agent edits.
       hmr: process.env.DISABLE_HMR !== 'true',
       // Disable file watching when DISABLE_HMR is true to save CPU during agent edits.
-      watch: process.env.DISABLE_HMR === 'true' ? null : {},
+      // Docker Desktop may miss Windows bind-mount events. Poll source files at
+      // a modest interval; Vite excludes node_modules and .git from watching.
+      watch: process.env.DISABLE_HMR === 'true' ? null : process.env.MEETPILOT_WATCH_POLLING === 'true'
+        ? { usePolling: true, interval: 1500, binaryInterval: 3000 } : {},
     },
   };
 });

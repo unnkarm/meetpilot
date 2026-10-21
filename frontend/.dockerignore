@@ -1,0 +1,10 @@
+node_modules
+dist
+dist-ssr
+coverage
+.git
+.env
+.env.*
+!.env.example
+*.log
+**/__pycache__
