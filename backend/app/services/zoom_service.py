@@ -24,7 +24,11 @@ ZOOM_RECORDINGS_URL = "https://api.zoom.us/v2/users/me/recordings"
 
 def get_zoom_auth_url(workspace_id: uuid.UUID, redirect_uri: str | None = None) -> str:
     """Generates the Zoom OAuth 2.0 authorization URL."""
-    client_id = settings.ZOOM_CLIENT_ID or "mock-zoom-client-id"
+    client_id = settings.ZOOM_CLIENT_ID
+    if not client_id or not settings.ZOOM_CLIENT_SECRET:
+        raise ValueError("Zoom integration is not configured on this server")
+    if redirect_uri and redirect_uri != settings.ZOOM_REDIRECT_URI:
+        raise ValueError("The callback URL must match the configured integration redirect URI")
     r_uri = redirect_uri or settings.ZOOM_REDIRECT_URI
 
     params = {
@@ -42,50 +46,34 @@ def exchange_zoom_code(
     """Exchanges authorization code for Zoom access and refresh tokens, encrypting at rest."""
     client_id = settings.ZOOM_CLIENT_ID
     client_secret = settings.ZOOM_CLIENT_SECRET
+    if not client_id or not settings.ZOOM_CLIENT_SECRET:
+        raise ValueError("Zoom integration is not configured on this server")
+    if redirect_uri and redirect_uri != settings.ZOOM_REDIRECT_URI:
+        raise ValueError("The callback URL must match the configured integration redirect URI")
     r_uri = redirect_uri or settings.ZOOM_REDIRECT_URI
 
-    user_name = "Team Account"
-    email = "team@zoom.us"
+    basic_auth = base64.b64encode(f"{client_id}:{client_secret}".encode("utf-8")).decode("utf-8")
+    resp = httpx.post(ZOOM_TOKEN_URL, headers={
+        "Authorization": f"Basic {basic_auth}", "Content-Type": "application/x-www-form-urlencoded"},
+        data={"grant_type": "authorization_code", "code": code, "redirect_uri": r_uri}, timeout=15.0)
+    resp.raise_for_status()
+    body = resp.json()
+    if not body.get("access_token"):
+        raise ValueError("Zoom did not return an access token")
     tokens = {
-        "access_token": "mock-zoom-access-token",
-        "refresh_token": "mock-zoom-refresh-token",
-        "expires_in": 3600,
+        "access_token": body["access_token"],
+        "refresh_token": body.get("refresh_token"),
+        "expires_in": body.get("expires_in", 3600),
         "created_at": datetime.datetime.utcnow().isoformat(),
     }
-
-    if client_id and client_secret:
-        try:
-            basic_auth = base64.b64encode(f"{client_id}:{client_secret}".encode("utf-8")).decode("utf-8")
-            headers = {
-                "Authorization": f"Basic {basic_auth}",
-                "Content-Type": "application/x-www-form-urlencoded",
-            }
-            data = {
-                "grant_type": "authorization_code",
-                "code": code,
-                "redirect_uri": r_uri,
-            }
-            resp = httpx.post(ZOOM_TOKEN_URL, headers=headers, data=data, timeout=15.0)
-            if resp.status_code == 200:
-                body = resp.json()
-                tokens = {
-                    "access_token": body.get("access_token"),
-                    "refresh_token": body.get("refresh_token") or tokens["refresh_token"],
-                    "expires_in": body.get("expires_in", 3600),
-                    "created_at": datetime.datetime.utcnow().isoformat(),
-                }
-                # Fetch profile
-                user_resp = httpx.get(
-                    ZOOM_USER_URL,
-                    headers={"Authorization": f"Bearer {tokens['access_token']}"},
-                    timeout=10.0,
-                )
-                if user_resp.status_code == 200:
-                    u_data = user_resp.json()
-                    user_name = f"{u_data.get('first_name', '')} {u_data.get('last_name', '')}".strip() or user_name
-                    email = u_data.get("email", email)
-        except Exception as exc:
-            logger.error("Failed to exchange Zoom OAuth code: %s", exc, exc_info=True)
+    user_resp = httpx.get(ZOOM_USER_URL,
+        headers={"Authorization": f"Bearer {tokens['access_token']}"}, timeout=10.0)
+    user_resp.raise_for_status()
+    profile = user_resp.json()
+    email = profile.get("email")
+    if not email:
+        raise ValueError("Zoom did not return the connected account email")
+    user_name = f"{profile.get('first_name', '')} {profile.get('last_name', '')}".strip() or email
 
     encrypted_data = encrypt_secret(json.dumps(tokens))
     masked_label = f"Zoom: {user_name} ({mask_secret(email)})"
