@@ -1,6 +1,79 @@
 # Workspace Access and Identity Audit
 
-**Updated: 8 October 2026.** Source changes are implemented and focused checks pass. Docker remains stopped; the database migration and live browser flows still require verification when the stack is available.
+**Re-audited: 12 October 2026.** Core authenticated HTTP access rules pass the
+current regression checks. Access control is **not complete**: the two findings
+below remain open. This audit records findings; it does not change application
+permissions. Docker remains stopped, and deployment/browser verification remains
+pending.
+
+## Current findings — 12 October
+
+### P1: Unverified meeting speech inherits the Pilot starter's read permissions
+
+`backend/app/api/routes/pilot_voice.py:177` loads the session starter as
+`query_user` and passes that account to `execute_pilot_query`. The
+`allow_actions=False` check at line 184 blocks only `action_request`. A task,
+workspace-document or historical-meeting question still runs as the starter.
+`pilot_runtime.py:115` applies task visibility to that account, while line 146
+passes the same account into workspace RAG.
+
+Consequently, if a manager starts the live meeting voice session, another caller
+can ask for the task list using that manager's scope. The caller has not proved
+workspace membership or their own account identity. Workspace knowledge and
+historical questions use this same path. The result can be spoken through the
+meeting bot to participants outside the workspace.
+
+**Reproduction:** called the actual `_handle_final` handler with
+`allow_actions=False`, a manager-owned session, and “Show the task list”, using
+the existing SQLite RBAC fixtures, fake Redis and disabled TTS. The handler
+completed and returned all **three** fixture task records, including the tasks
+assigned to two different teammates. No model, meeting provider or real user data
+was involved. This confirms the read-scope problem independently of STT quality.
+
+**Required fix:** give meeting-origin speech an explicit read scope separate
+from the authenticated dashboard/microphone principal. Default it to evidence
+from the current meeting; do not expose personal task records, company documents
+or other meetings merely because a manager owns the transport session. Any
+broader sharing needs an explicit authorized policy. Apply the scope after
+follow-up intent resolution and before every retrieval/tool call. Speaker names
+and manager-confirmed attribution must never grant the caller manager authority.
+Add regressions for task lists, workspace/historical RAG and follow-up queries.
+
+### P2: Clerk token verification does not restrict authorized origins
+
+`backend/app/core/security.py:60` validates RS256 signatures, issuer and expiry,
+but explicitly disables audience validation and never checks `azp`. A correctly
+signed synthetic token with the configured issuer, an unexpected browser origin
+and an unrelated audience was accepted by the current verifier. This is a
+missing token-purpose/origin policy, not proof that unsigned or forged tokens
+can log in; those rejection tests passed.
+
+Clerk recommends checking a present `azp` against the application's allowed
+origins in its [manual verification guidance](https://clerk.com/docs/guides/sessions/manual-jwt-verification).
+Add a server-controlled authorized-party allowlist for development and hosted
+origins, shared by HTTP and WebSocket verification. Add explicit audience
+configuration when using audience-bearing token templates; ordinary Clerk
+session tokens must remain compatible with the chosen policy. Cover missing,
+malformed and unexpected claims without weakening signature or issuer checks.
+
+### Current verification and limits
+
+- **235 backend tests ran: 232 passed, 3 skipped**, covering authentication,
+  workspace access/isolation, knowledge retrieval, Pilot, review jobs and related
+  regressions. Existing tests did not reject the unverified-meeting read scenario;
+  the additional targeted reproduction above exposed it.
+- **4 frontend permission tests passed**, and frontend TypeScript checks passed.
+- Backend compilation passed. Services, queues, audio/model generation and JWT
+  key fetching were mocked or disabled where relevant. HTTP permission tests use
+  SQLite; no Docker stack, paid API or real meeting was started.
+- This does not verify installed PostgreSQL migrations, real Clerk production
+  settings, multi-account browser use or long-running session revocation in a
+  deployed meeting. Join-request rate limits, administrative audit/retention and
+  hosted operational controls remain production follow-ups.
+
+The remaining sections document the intended policy and the earlier implemented
+controls. The open findings above qualify any earlier statement that access
+control is fully enforced.
 
 ## Requested policy
 
