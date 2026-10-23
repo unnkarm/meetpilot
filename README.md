@@ -4,6 +4,8 @@ MeetPilot turns meetings into searchable workspace knowledge and an active voice
 
 See the [complete feature roadmap](docs/Feature_Roadmap.md), [cloud AI migration](docs/Cloud_AI.md), and [SaaS deployment/scaling/marketing plan](docs/SaaS_Deployment_Scaling_GoToMarket.md). Planned features and production requirements are labeled separately from the implemented beta.
 
+For the founder's Azure for Students account, see the [student deployment guide](docs/Azure_Student_Deployment.md): free frontend preview, finite-credit compute planning, account checks and remaining hosted release gates. The frontend deployment template in `deploy/azure/frontend.manual.yml` is inactive until deliberately installed as a GitHub workflow; no Azure deployment is implied by these files.
+
 ## Current product flow
 
 Sign in with Clerk, create a workspace, upload a recording, and watch it move through queued, transcribing, embedding, analyzing and completed states. A completed meeting has timestamped transcript turns, a summary, tasks and decisions. Users can edit the interpretations, ask questions with source citations, search workspace knowledge, add documents, and manage tasks. Failed or stale jobs show a retry action. A clearly marked sample workspace is available through **Explore Demo**. Live meetings use the self-hosted Vexa engine; imported recordings use the local upload pipeline.
@@ -31,6 +33,22 @@ docker compose ps
 ~~~
 
 Open http://localhost:3000. API health: http://localhost:8000/health. First startup also initializes pgvector and applies Alembic migrations. The backend image bundles the default faster-whisper base model and Piper voice during build. Pull the Ollama models once while online; Docker volumes retain them for later offline inference. Compose connects the backend to its Ollama service by default. For a host-installed Ollama, set OLLAMA_URL to http://host.docker.internal:11434 before Compose startup.
+
+### Updating only the dashboard
+
+The development frontend container mounts the current `frontend/src`, `public`,
+HTML and Vite configuration. Rebuild it after dependency or Dockerfile changes:
+
+```powershell
+docker compose up -d --build --no-deps frontend
+```
+
+This updates only the frontend, without starting the model or meeting services.
+`npm run build` in `frontend` writes a production bundle to `frontend/dist`; it
+does not replace a running Docker container. If a container created before these
+mounts shows the old dashboard, run the command above and refresh the browser.
+Compose enables source polling every 1.5 seconds because Docker Desktop can miss
+Windows file change events. This also invalidates Vite's cached modules after edits.
 
 ## Meeting review tools
 

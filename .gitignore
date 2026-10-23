@@ -139,12 +139,17 @@ scratch/
 docs/
 !docs/
 docs/*
+screenshots/*
+
 !docs/Multilingual.md
 !docs/Workspace_Access_Audit.md
 !docs/SaaS_Deployment_Scaling_GoToMarket.md
 !docs/Feature_Roadmap.md
 !docs/Cloud_AI.md
 !docs/Review_Tools.md
+!docs/Frontend_SaaS_Redesign.md
+!docs/Legal_Policies.md
+!docs/Azure_Student_Deployment.md
 
 # External upstream reference checkouts
 /vexa/

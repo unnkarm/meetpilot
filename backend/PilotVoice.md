@@ -39,6 +39,20 @@ The command checks active workers and the owned provider lifecycle before requeu
 
 With Pilot Voice started, say **Pilot**, **Hey Pilot**, **Hi Pilot**, **Hello Pilot**, **OK Pilot**, or **MeetPilot**. The first recognized partial name triggers **Yes sir.** without waiting for the AI answer. Its short acknowledgement is generated locally and cached at startup. You can keep speaking your question during the acknowledgement, or ask within the next ten seconds. Partial/final retransmissions of the same utterance do not repeat the acknowledgement. Recognition still depends on local Whisper and the incoming transcript cadence.
 
+Live meetings now default to **Meeting bot (live calls)** in Pilot Voice. Say **“Pilot, give me a summary of the meeting”** or **“What key points have we discussed?”**. The recap uses original transcript evidence across the meeting timeline plus source-linked agreements and commitments. Long meetings use bounded excerpts; coverage metadata records sampling, and the model must not claim an exhaustive recap. Recent questions such as **“What did we just discuss?”** use recent unembedded turns directly, avoiding an embedding-model switch before the answer.
+
+Replies use conversational sentences. Internal source handles such as `S11` are removed from answers; citations remain under **Sources** in the panel with speaker names, timestamps and quotes. Ordinary technical references such as AWS S3 are preserved. Missing evidence produces an uncertainty response rather than an invented meeting fact.
+
+After a reply, the same named meeting participant can ask a follow-up for 30 seconds without another wake phrase, for example **“Make it shorter”** or **“Explain the second point”**. The authenticated microphone permits unlabelled follow-ups. Unknown meeting speakers need a wake phrase for a new turn. Brief user/assistant history resolves references; fresh workspace-scoped evidence remains required for factual answers. Ordinary nearby statements do not count as meeting follow-up questions.
+
+Pilot starts retrieval while **Yes sir** plays. Repeating an in-flight question does not discard its answer; one distinct next question can wait behind it. Speaking during playback stops the older reply and captures the new turn. Cancellation stops synthesis/playback and releases the shared voice lock before another reply starts. Failed browser playback is reported as a failure, rather than acknowledged as successful audio.
+
+Microphone capture keeps 200 ms of leading audio, emits its first partial after 600 ms of speech, and assigns a stable utterance ID. Questions can run for up to 30 seconds. The silence cutoff defaults to 700 ms; set `PILOT_SILENCE_END_MS=900` in `backend/.env` if your natural pauses split microphone questions. This setting affects dashboard microphone capture, not Vexa's live-call capture pipeline.
+
+The upstream Google Meet capture defaults can wait 15 seconds before submitting isolated short speech. The launcher now requests minimum audio of 0.4 seconds, submissions every 1 second, and an idle timeout of 1.5 seconds, retaining two-pass transcript confirmation. These are supported upstream `BOT_SPEAKER_*` controls. The launcher checks the image's compiled configuration and logs a warning when it cannot confirm support; changes in the reference checkout alone do not change the pinned image. Actual latency still requires a live test. To reduce repeated recognition work on a busy CPU, override `BOT_SPEAKER_SUBMIT_INTERVAL_SEC=2` in `backend/.env.vexa` before starting a new bot. No credentials need to change.
+
+After a live meeting ends, stop its voice session and start **My microphone** for questions about the saved meeting. Replies play in the browser, rather than being sent to the departed bot.
+
 In **Settings → Bot Voice**, preview and save **Lessac** or **Ryan**. Both neural models are bundled for offline execution. Owners and admins can change the workspace voice; members can preview it. A saved voice applies to the next spoken reply, including the wake acknowledgement.
 
 Vexa posts 16kHz mono PCM WAV chunks to the private local Whisper adapter. That endpoint accepts only a generated service token and uses locally installed model files. Piper streams 24kHz mono PCM into Vexa's virtual microphone through its existing TTS playback module; espeak-ng is the fallback. Chromium's remote output sink is separate from the TTS microphone sink.
@@ -57,6 +71,38 @@ npm run build
 ```
 
 The speech smoke test uses real local Piper and upstream paplay. It tests process completion and interruption without opening another meeting. A real meeting test is still needed to validate platform admission and remote audio. Google Meet admission, live named transcripts, and recording download were exercised in this setup. Teams and Zoom have not yet been exercised live.
+
+### October 8 conversational fixes
+
+The conversation/answer/capture fixes were checked locally with mock speech/model providers, fake Redis, SQLite, and protocol tests: 135 backend tests passed, one PostgreSQL integration test was skipped, 13 Node playback tests passed, and eight frontend language/access tests passed. Backend compilation, TypeScript checking, and the frontend production build passed. The build retains its existing large-bundle warning. Docker, Ollama and meeting bots stayed stopped. These checks verify routing, source separation, access boundaries, frame preservation, cancellation and playback acknowledgements; they do not measure real Whisper/Qwen accuracy or live latency on this computer.
+
+When ready, rebuild the frontend and restart the Python services. The Vexa adapter files are mounted from `deploy/vexa` and load when a bot starts, so stop and rejoin any existing bot. A full local refresh is:
+
+```powershell
+docker compose up -d --build
+docker compose restart backend meeting_bot celery_worker
+```
+
+Then start Pilot Voice and try, once each:
+
+1. **“Pilot”**, pause for **“Yes sir”**, then **“Give me a summary of this meeting.”**
+2. **“Make it shorter.”** within the follow-up window.
+3. **“Pilot, what did we just decide?”** after discussing a real decision.
+4. Start another question while Pilot is speaking; the old audio should stop.
+
+Check the **Heard/Hearing** text and **Sources** if an answer is unexpected. Local model size, CPU load and transcript quality still affect responsiveness; these source changes do not establish parity with GPT's real-time voice service.
+
+### October 8 mixed English/Bengali/Hindi follow-up
+
+Choose **Mixed / auto · English, Bengali, Hindi + others** for a code-switched meeting. English remains the default for a new meeting. The microphone, live-call and recording Whisper paths now use multilingual transcription without translating the stored evidence. **Pilot / Hey Pilot** and **Yes sir** stay English; the question and subsequent same-speaker follow-up can be Bengali or Hindi. Replies follow the question's language, with localized uncertainty when sources are missing. See [Multilingual processing](../docs/Multilingual.md) for examples and language overrides.
+
+The private Vexa voice token carries the reply language together with the selected voice and playback correlation ID. Native-script speech uses local espeak-ng unless a matching Hindi/Bengali Piper model is installed and configured. The two bundled Piper models remain English voices. Script switching keeps technical terms and source quotes intact, and shared Indic punctuation does not trigger a voice change.
+
+Confirmed live decisions, commitments, explicit deadlines and labelled blockers now support native Bengali/Hindi signals. Final analysis retains live decisions and completed/assigned tasks. Structured items from all transcript windows survive the bounded prose-summary roll-up, including different decisions about the same topic. Native task creation still requires an authenticated manager, a uniquely resolved workspace member and exact request text; meeting audio is not an account authorization method.
+
+Validation after these changes: **190 backend tests passed, three integration checks skipped**, 13 Node playback tests passed and eight frontend language/access tests passed. Backend compilation, TypeScript checking and the production build passed; the existing large-bundle warning remains. Tests used fake model/speech providers, fake Redis, SQLite and protocol fixtures. Installed language libraries were used for language metadata checks; speech model weights were not downloaded or loaded. Docker, Ollama and meeting bots stayed stopped. Real code-switched audio accuracy and response latency still need the short meeting test described in the multilingual guide.
+
+Rebuild the Python images when ready: the faster-whisper minimum is now **1.2.1**. Restart the frontend/backend/worker services and rejoin the bot after selecting the meeting language. Optional new Piper voices need to be installed locally before their environment paths are enabled.
 
 ## Diagnose
 

@@ -13,6 +13,18 @@
 
 ## Facts verified in repository
 
+- Policy foundation (12 October 2026): separate public Terms, Privacy and
+  Recording pages and first-action acknowledgment are implemented. Signup and
+  workspace entry never prompt. Agreement is once per account across logins,
+  workspaces and policy revisions; Settings retains the date/version and links.
+  Live/uploads reference the original receipt; no per-recording checkbox or
+  verified participant consent is implied. The founder confirmed MeetPilot
+  is not registered yet; policies are development drafts with unfinished
+  operator/provider/retention disclosures. They do not prove participant consent
+  or legal compliance. See `docs/Legal_Policies.md` for covered flows, tests and
+  the DPA/security/deletion/public-launch work still required.
+
+- Access re-audit (12 October 2026): core HTTP role/join/assignment rules passed; 235 backend tests ran (232 passed, 3 skipped), four frontend permission tests and TypeScript checks passed. Two issues remain open: unverified meeting-origin Pilot reads inherit the session starter's account scope (a targeted SQLite handler reproduction returned all three task records under a manager session), and Clerk JWT verification lacks authorized-party checks/configured audience policy. See docs/Workspace_Access_Audit.md. This was an audit; application permissions were not changed. Do not describe overall access control as complete until these findings are fixed and deployed flows are verified.
 - Review tools now have workspace templates, personal queued artifacts and shared bookmarks, with a new migration f6a7b8c9d0e1. Five personas, cited email/chat digest drafts, audio chapters, task/blocker review, approximate speaking metrics, a personal cost estimate and opt-in transcript-gap/pacing playback are implemented. See docs/Review_Tools.md. Original base summaries are preserved; external messages are not sent. Model/provider and live UI quality still need deliberate verification.
 - Review jobs use the processing queue, current membership checks, transcript fingerprints, per-user pending caps, UUID idempotency and worker run tokens. Drafts remain private to their creator; bookmarks follow current shared-meeting access and creator/manager deletion rules. Keep this separation when implementing further features.
 - Review expansion verification (8 October 2026): 232 backend tests ran, 229 passed and three opt-in integrations skipped; 12 frontend tests, compilation, TypeScript lint, production build and diff checks passed. Migration upgrade/downgrade used isolated SQLite adapters. Actual PostgreSQL migration, model output quality and browser/live-call verification remain pending. No full stack or paid requests were started.
@@ -37,3 +49,17 @@ Follow README.md for scheduled local startup, model provisioning and Clerk confi
 ## Guardrails
 
 Preserve workspace filters, source evidence, verified identity boundaries and retry idempotency. All teammates may read workspace-visible meetings; members see their assigned tasks, and managers control documents/membership/integrations. Future sensitivity rules must also protect RAG, voice, media, sharing and external delivery. Never claim a heuristic or model inference as verified fact. Keep secrets outside source. Billing, cloud inference, private object storage and usage quotas are planned SaaS requirements; implement them through service interfaces and verified migration gates, without activating paid services automatically. Keep PostgreSQL/pgvector unless measurements justify another database.
+
+## SaaS frontend redesign — 12 October 2026
+
+The frontend now uses a light, restrained teal design across the public page,
+authentication, workspace shell and feature screens. Added a real searchable meeting
+library and exposed workspace task creation, status reopening and source evidence.
+Calendar/Zoom callback screens complete the previously disconnected OAuth UI; failed
+or unconfigured backend exchanges now reject instead of persisting mock connections.
+PDF printing includes all meeting sections. Existing role filters, join approvals,
+multilingual/voice controls and Vexa Lite dispatch remain in place. The public page
+and workspace are separate bundles. Verification uses isolated fixture APIs and
+source checks; no full Docker/model stack or paid providers were started. See
+`docs/Frontend_SaaS_Redesign.md` for coverage and remaining hosted launch gates,
+including the outstanding backend access-audit findings.

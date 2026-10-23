@@ -39,6 +39,15 @@ quotas and billing are **not** implemented by those adapters.
 
 ## 2. Shared requirements for all features
 
+**Policy foundation, 12 October 2026 — source-implemented, development draft:**
+Public Terms, Privacy and Recording pages plus a one-time first-action account
+acknowledgment are implemented. No signup/entry or repeat prompts; Settings shows
+the receipt and current policies. Live/uploads check the saved receipt, with
+no per-recording checkbox. Operator identification,
+reviewed production terms, a DPA, actual provider/retention disclosures and
+deletion/security operations remain launch dependencies. No participant-consent
+verification or compliance certification is claimed. See `Legal_Policies.md`.
+
 - Enforce current workspace membership and role/sensitivity permissions before
   retrieval, generation, playback, export or external delivery. Filter before
   ranking, limits and model prompts.
@@ -188,3 +197,14 @@ and **verified in a real hosted meeting**. Never mark the last one from a build.
 See [deployment, scaling and marketing](SaaS_Deployment_Scaling_GoToMarket.md),
 [current architecture](Architecture.md), [engineering memory](Memory.md),
 [access audit](Workspace_Access_Audit.md) and [delivery status](Phases.md).
+
+
+## Frontend delivery update — 12 October 2026
+
+The SaaS visual redesign and frontend feature connections are implemented in source:
+responsive shell, meeting library/filtering, task creation/status management, sourced
+knowledge/search navigation, complete printable meeting reports, accessible dialogs
+and Calendar/Zoom OAuth return screens. Existing review, voice, workspace approval
+and manager controls are retained and restyled. Isolated browser walkthroughs use
+fixture APIs; this does not mark the hosted integrations or launch as verified.
+See [frontend delivery and verification](Frontend_SaaS_Redesign.md).
