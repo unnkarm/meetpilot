@@ -29,27 +29,27 @@ export const ExportDropdown: React.FC<ExportDropdownProps> = ({
     <div className="relative inline-block text-left" ref={dropdownRef}>
       <button
         onClick={() => setIsOpen(!isOpen)}
-        className="px-3.5 py-2 rounded-xl bg-[#18181b] hover:bg-[#27272A] text-slate-200 hover:text-white border border-[#27272A] text-xs font-bold flex items-center gap-2 transition-all cursor-pointer shadow-sm active:scale-95"
+        className="px-3.5 py-2 rounded-xl bg-surface hover:bg-line text-ink hover:text-ink border border-line text-sm font-bold flex items-center gap-2 transition-all cursor-pointer shadow-sm active:scale-95"
       >
-        <Download className="w-3.5 h-3.5 text-[#8B5CF6]" />
+        <Download className="w-3.5 h-3.5 text-brand" />
         <span>Export</span>
-        <ChevronDown className={`w-3.5 h-3.5 text-slate-400 transition-transform ${isOpen ? 'rotate-180' : ''}`} />
+        <ChevronDown className={`w-3.5 h-3.5 text-muted transition-transform ${isOpen ? 'rotate-180' : ''}`} />
       </button>
 
       {isOpen && (
-        <div className="absolute right-0 mt-2 w-52 rounded-xl bg-[#18181b] border border-[#27272A] shadow-2xl py-1.5 z-50 animate-fadeIn divide-y divide-[#27272A]">
+        <div className="absolute right-0 mt-2 w-52 rounded-xl bg-surface border border-line shadow-sm py-1.5 z-50 animate-fadeIn divide-y divide-line">
           <div className="p-1 space-y-0.5">
             <button
               onClick={() => {
                 onExportMarkdown();
                 setIsOpen(false);
               }}
-              className="w-full text-left px-3 py-2 text-xs font-semibold text-slate-200 hover:text-white hover:bg-[#27272A] rounded-lg flex items-center gap-2.5 transition-colors cursor-pointer"
+              className="w-full text-left px-3 py-2 text-sm font-semibold text-ink hover:text-ink hover:bg-line rounded-lg flex items-center gap-2.5 transition-colors cursor-pointer"
             >
-              <FileCode className="w-4 h-4 text-[#8B5CF6]" />
+              <FileCode className="w-4 h-4 text-brand" />
               <div>
                 <div>Markdown Summary</div>
-                <div className="text-[10px] text-slate-500 font-normal">Formatted briefing doc (.md)</div>
+                <div className="text-sm text-muted font-normal">Formatted briefing doc (.md)</div>
               </div>
             </button>
 
@@ -58,12 +58,12 @@ export const ExportDropdown: React.FC<ExportDropdownProps> = ({
                 onExportJSON();
                 setIsOpen(false);
               }}
-              className="w-full text-left px-3 py-2 text-xs font-semibold text-slate-200 hover:text-white hover:bg-[#27272A] rounded-lg flex items-center gap-2.5 transition-colors cursor-pointer"
+              className="w-full text-left px-3 py-2 text-sm font-semibold text-ink hover:text-ink hover:bg-line rounded-lg flex items-center gap-2.5 transition-colors cursor-pointer"
             >
-              <FileText className="w-4 h-4 text-cyan-400" />
+              <FileText className="w-4 h-4 text-cyan-700" />
               <div>
                 <div>JSON Schema</div>
-                <div className="text-[10px] text-slate-500 font-normal">Raw segments & tasks (.json)</div>
+                <div className="text-sm text-muted font-normal">Raw segments & tasks (.json)</div>
               </div>
             </button>
 
@@ -72,12 +72,12 @@ export const ExportDropdown: React.FC<ExportDropdownProps> = ({
                 onExportPDF();
                 setIsOpen(false);
               }}
-              className="w-full text-left px-3 py-2 text-xs font-semibold text-slate-200 hover:text-white hover:bg-[#27272A] rounded-lg flex items-center gap-2.5 transition-colors cursor-pointer"
+              className="w-full text-left px-3 py-2 text-sm font-semibold text-ink hover:text-ink hover:bg-line rounded-lg flex items-center gap-2.5 transition-colors cursor-pointer"
             >
-              <Printer className="w-4 h-4 text-emerald-400" />
+              <Printer className="w-4 h-4 text-emerald-700" />
               <div>
                 <div>Print / PDF</div>
-                <div className="text-[10px] text-slate-500 font-normal">Executive print layout</div>
+                <div className="text-sm text-muted font-normal">Executive print layout</div>
               </div>
             </button>
           </div>
