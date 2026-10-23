@@ -125,7 +125,7 @@ export const DiarizedTranscript: React.FC<DiarizedTranscriptProps> = ({
     const parts = text.split(new RegExp(`(${query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'gi'));
     return parts.map((part, i) =>
       part.toLowerCase() === query.toLowerCase() ? (
-        <mark key={i} className="bg-amber-400/30 text-amber-200 px-0.5 rounded font-semibold">
+        <mark key={i} className="bg-amber-400/30 text-amber-700 px-0.5 rounded font-semibold">
           {part}
         </mark>
       ) : (
@@ -135,28 +135,28 @@ export const DiarizedTranscript: React.FC<DiarizedTranscriptProps> = ({
   };
 
   return (
-    <div className="p-6 rounded-2xl bg-[#111113] border border-[#27272A] space-y-4 shadow-xl">
+    <div className="p-6 rounded-xl bg-surface border border-line space-y-4 shadow-sm">
       {/* Header & Controls Strip */}
-      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 pb-3 border-b border-[#27272A]">
+      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 pb-3 border-b border-line">
         {/* Left Side: Title & Speakers Badge */}
         <div className="space-y-1">
           <div className="flex items-center gap-2.5 flex-wrap">
-            <h3 className="text-sm font-bold text-white uppercase tracking-wider flex items-center gap-2">
-              <FileText className="w-4 h-4 text-[#8B5CF6]" />
+            <h3 className="text-sm font-bold text-ink uppercase tracking-wider flex items-center gap-2">
+              <FileText className="w-4 h-4 text-brand" />
               <span>Transcript with Speaker Labels</span>
-              <span className="text-xs font-mono font-normal text-slate-400">
+              <span className="text-sm font-mono font-normal text-muted">
                 ({segments.length} turns)
               </span>
             </h3>
 
             {isLongRecording && (
-              <span className="px-2 py-0.5 rounded-full text-[10px] font-mono font-bold bg-[#8B5CF6]/20 text-[#8B5CF6] border border-[#8B5CF6]/30">
+              <span className="px-2 py-0.5 rounded-full text-sm font-mono font-bold bg-brand/20 text-brand border border-brand/30">
                 Long recording
               </span>
             )}
           </div>
-          <p className="text-xs text-slate-400">
-            {speakerStats.displayLabel} · Click any timestamp or turn to jump playback.
+          <p className="text-sm text-muted">
+            {speakerStats.displayLabel} &middot; Click any timestamp or turn to jump playback.
           </p>
         </div>
 
@@ -164,7 +164,7 @@ export const DiarizedTranscript: React.FC<DiarizedTranscriptProps> = ({
         <div className="flex items-center gap-2.5 flex-wrap">
           {/* Transcript Search Bar */}
           <div className="relative flex items-center">
-            <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 pointer-events-none" />
+            <Search className="w-3.5 h-3.5 text-muted absolute left-3 pointer-events-none" />
             <input
               type="text"
               placeholder="Search in transcript..."
@@ -173,12 +173,12 @@ export const DiarizedTranscript: React.FC<DiarizedTranscriptProps> = ({
                 setSearchQuery(e.target.value);
                 setActiveMatchIndex(0);
               }}
-              className="bg-[#18181b] border border-[#27272A] rounded-xl pl-8 pr-8 py-1.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-[#8B5CF6] w-48 sm:w-56"
+              className="bg-surface border border-line rounded-xl pl-8 pr-8 py-1.5 text-sm text-ink placeholder-slate-500 focus:outline-none focus:border-brand w-48 sm:w-56"
             />
             {searchQuery && (
               <button
                 onClick={() => setSearchQuery('')}
-                className="absolute right-2.5 text-slate-400 hover:text-white"
+                className="absolute right-2.5 text-muted hover:text-ink"
               >
                 <X className="w-3.5 h-3.5" />
               </button>
@@ -187,21 +187,21 @@ export const DiarizedTranscript: React.FC<DiarizedTranscriptProps> = ({
 
           {/* Search Result Counter & Nav */}
           {searchQuery && searchMatchCount > 0 && (
-            <div className="flex items-center gap-1 bg-[#18181b] border border-[#27272A] px-2 py-1 rounded-xl text-xs font-mono">
-              <span className="text-[#8B5CF6] font-bold">
+            <div className="flex items-center gap-1 bg-surface border border-line px-2 py-1 rounded-xl text-sm font-mono">
+              <span className="text-brand font-bold">
                 {activeMatchIndex + 1}/{searchMatchCount}
               </span>
               <button
                 onClick={handlePrevMatch}
                 title="Previous match"
-                className="p-0.5 hover:text-white text-slate-400"
+                className="p-0.5 hover:text-ink text-muted"
               >
                 <ArrowUp className="w-3 h-3" />
               </button>
               <button
                 onClick={handleNextMatch}
                 title="Next match"
-                className="p-0.5 hover:text-white text-slate-400"
+                className="p-0.5 hover:text-ink text-muted"
               >
                 <ArrowDown className="w-3 h-3" />
               </button>
@@ -211,13 +211,13 @@ export const DiarizedTranscript: React.FC<DiarizedTranscriptProps> = ({
           {/* Auto-Scroll Toggle */}
           <button
             onClick={() => setAutoScroll(!autoScroll)}
-            className={`px-3 py-1.5 rounded-xl border text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer ${
+            className={`px-3 py-1.5 rounded-xl border text-sm font-semibold flex items-center gap-1.5 transition-colors cursor-pointer ${
               autoScroll
-                ? 'bg-[#8B5CF6]/15 border-[#8B5CF6]/40 text-white'
-                : 'bg-[#18181b] border-[#27272A] text-slate-400 hover:text-white'
+                ? 'bg-brand/15 border-brand/40 text-ink'
+                : 'bg-surface border-line text-muted hover:text-ink'
             }`}
           >
-            <Clock className="w-3 h-3 text-[#8B5CF6]" />
+            <Clock className="w-3 h-3 text-brand" />
             <span>Follow Audio</span>
           </button>
         </div>
@@ -225,17 +225,17 @@ export const DiarizedTranscript: React.FC<DiarizedTranscriptProps> = ({
 
       {/* Speaker Airtime Distribution Breakdown */}
       {speakerStats.airtime.length > 0 && (
-        <div className="p-3.5 rounded-xl bg-[#18181b] border border-[#27272A] space-y-2">
-          <div className="flex items-center justify-between text-[11px] font-mono font-semibold text-slate-400">
+        <div className="p-3.5 rounded-xl bg-surface border border-line space-y-2">
+          <div className="flex items-center justify-between text-sm font-mono font-semibold text-muted">
             <span className="flex items-center gap-1.5">
-              <Users className="w-3.5 h-3.5 text-[#8B5CF6]" />
+              <Users className="w-3.5 h-3.5 text-brand" />
               <span>Participation Breakdown</span>
             </span>
             <span>{speakerStats.detectedCount} Speakers</span>
           </div>
 
           {/* Stacked Progress Bar */}
-          <div className="h-2 w-full bg-[#111113] rounded-full overflow-hidden flex border border-[#27272A]">
+          <div className="h-2 w-full bg-surface rounded-full overflow-hidden flex border border-line">
             {speakerStats.airtime.map((spk, idx) => (
               <div
                 key={idx}
@@ -251,11 +251,11 @@ export const DiarizedTranscript: React.FC<DiarizedTranscriptProps> = ({
             {speakerStats.airtime.map((spk, idx) => (
               <div
                 key={idx}
-                className="flex items-center gap-1.5 text-xs text-slate-300 font-medium"
+                className="flex items-center gap-1.5 text-sm text-ink font-medium"
               >
                 <span className={`w-2.5 h-2.5 rounded-full ${spk.colorTheme.avatarBg}`} />
                 <span>{displayText(spk.speaker)}</span>
-                <span className="text-slate-500 font-mono text-[10px]">({spk.percentage}%)</span>
+                <span className="text-muted font-mono text-sm">({spk.percentage}%)</span>
               </div>
             ))}
           </div>
@@ -264,9 +264,9 @@ export const DiarizedTranscript: React.FC<DiarizedTranscriptProps> = ({
 
       {/* Synchronized Diarized Turns Feed */}
       {filteredSegments.length === 0 ? (
-        <div className="p-10 text-center border border-dashed border-[#27272A] rounded-xl space-y-2">
-          <FileText className="w-8 h-8 text-slate-500 mx-auto" />
-          <p className="text-xs text-slate-400">
+        <div className="p-10 text-center border border-dashed border-line rounded-xl space-y-2">
+          <FileText className="w-8 h-8 text-muted mx-auto" />
+          <p className="text-sm text-muted">
             {searchQuery
               ? `No spoken turns found matching "${searchQuery}".`
               : 'Transcript is not available yet.'}
@@ -292,16 +292,16 @@ export const DiarizedTranscript: React.FC<DiarizedTranscriptProps> = ({
                 onClick={() => onSeek(tr.start_time)}
                 className={`p-4 rounded-xl border transition-all duration-150 cursor-pointer space-y-2 ${
                   isActive
-                    ? 'bg-[#1e1b4b]/40 border-[#8B5CF6] shadow-md shadow-[#8B5CF6]/10 ring-1 ring-[#8B5CF6]/40'
-                    : 'bg-[#18181b] border-[#27272A] hover:border-[#8B5CF6]/40 hover:bg-[#1a1a22]'
+                    ? 'bg-brand-soft/40 border-brand shadow-md shadow-sm/10 ring-1 ring-brand/40'
+                    : 'bg-surface border-line hover:border-brand/40 hover:bg-surface-muted'
                 }`}
               >
                 {/* Speaker Avatar + Name + Timestamp Seek Button */}
-                <div className="flex items-center justify-between text-xs">
+                <div className="flex items-center justify-between text-sm">
                   <div className="flex items-center gap-2.5">
                     {/* Deterministic Initial Avatar */}
                     <div
-                      className={`w-7 h-7 rounded-lg ${theme.avatarBg} flex items-center justify-center text-[11px] font-black text-white shadow-sm shrink-0`}
+                      className={`w-7 h-7 rounded-lg ${theme.avatarBg} flex items-center justify-center text-sm font-semibold text-white shadow-sm shrink-0`}
                     >
                       {initials}
                     </div>
@@ -310,7 +310,7 @@ export const DiarizedTranscript: React.FC<DiarizedTranscriptProps> = ({
 
                   <div className="flex items-center gap-2">
                     {isActive && (
-                      <span className="flex items-center gap-1 text-[10px] font-mono text-emerald-400 font-bold bg-emerald-500/10 px-2 py-0.5 rounded-md border border-emerald-500/20 animate-pulse">
+                      <span className="flex items-center gap-1 text-sm font-mono text-emerald-700 font-bold bg-emerald-500/10 px-2 py-0.5 rounded-md border border-emerald-500/20 animate-pulse">
                         <Volume2 className="w-3 h-3" />
                         <span>PLAYING</span>
                       </span>
@@ -322,7 +322,7 @@ export const DiarizedTranscript: React.FC<DiarizedTranscriptProps> = ({
                         onSeek(tr.start_time);
                       }}
                       title="Jump audio to this second"
-                      className="text-[11px] font-mono text-[#8B5CF6] hover:text-white bg-[#8B5CF6]/10 hover:bg-[#8B5CF6] px-2.5 py-0.5 rounded-lg border border-[#8B5CF6]/20 transition-colors cursor-pointer flex items-center gap-1 font-semibold"
+                      className="text-sm font-mono text-brand hover:text-on-brand bg-brand/10 hover:bg-brand px-2.5 py-0.5 rounded-lg border border-brand/20 transition-colors cursor-pointer flex items-center gap-1 font-semibold"
                     >
                       <Play className="w-2.5 h-2.5 fill-current" />
                       <span>@{formatTimeSeconds(tr.start_time)}</span>
@@ -331,7 +331,7 @@ export const DiarizedTranscript: React.FC<DiarizedTranscriptProps> = ({
                 </div>
 
                 {/* Spoken Text with Search Query Highlight */}
-                <p className="text-xs sm:text-sm text-slate-200 leading-relaxed pl-9" title={tr.text}>
+                <p className="text-sm sm:text-sm text-ink leading-relaxed pl-9" title={tr.text}>
                   {highlightText(displayText(tr.text), searchQuery)}
                 </p>
               </div>

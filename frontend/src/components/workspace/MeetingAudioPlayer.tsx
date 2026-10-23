@@ -49,6 +49,7 @@ export const MeetingAudioPlayer: React.FC<MeetingAudioPlayerProps> = ({
   const [skipSilence, setSkipSilence] = useState(false);
   const [adaptiveSpeed, setAdaptiveSpeed] = useState(false);
   const intervals = useMemo(() => speechIntervals(segments, duration), [segments, duration]);
+  const initialPosition = useRef(currentTime);
   const getTokenRef = useRef(getToken);
   getTokenRef.current = getToken;
 
@@ -138,6 +139,7 @@ export const MeetingAudioPlayer: React.FC<MeetingAudioPlayerProps> = ({
     };
 
     const handleLoadedMetadata = () => {
+      if (initialPosition.current > 0) { audio.currentTime = initialPosition.current; initialPosition.current = 0; }
       updateDuration();
       setIsLoading(false);
     };
@@ -250,7 +252,7 @@ export const MeetingAudioPlayer: React.FC<MeetingAudioPlayerProps> = ({
   const progressPercent = effectiveDuration > 0 ? Math.min(100, (currentTime / effectiveDuration) * 100) : 0;
 
   return (
-    <div className="p-4 sm:p-5 rounded-2xl bg-[#111113] border border-[#27272A] shadow-xl space-y-3">
+    <div className="p-4 sm:p-5 rounded-xl bg-surface border border-line shadow-sm space-y-3">
       {/* Hidden Native Audio Element */}
       <audio
         ref={audioRef as React.LegacyRef<HTMLAudioElement>}
@@ -265,7 +267,7 @@ export const MeetingAudioPlayer: React.FC<MeetingAudioPlayerProps> = ({
           <button
             onClick={() => skipSeconds(-5)}
             title="Rewind 5 seconds"
-            className="p-2 rounded-xl text-slate-400 hover:text-white hover:bg-[#18181b] transition-colors cursor-pointer"
+            className="p-2 rounded-xl text-muted hover:text-ink hover:bg-surface transition-colors cursor-pointer"
           >
             <RotateCcw className="w-4 h-4" />
           </button>
@@ -274,7 +276,7 @@ export const MeetingAudioPlayer: React.FC<MeetingAudioPlayerProps> = ({
           <button
             onClick={togglePlay}
             disabled={hasError || isLoading}
-            className="w-11 h-11 rounded-full bg-[#8B5CF6] hover:bg-[#7c3aed] disabled:opacity-40 text-white flex items-center justify-center cursor-pointer shadow-lg shadow-[#8B5CF6]/30 transition-transform active:scale-95 shrink-0"
+            className="w-11 h-11 rounded-full bg-brand hover:bg-brand disabled:opacity-40 text-on-brand flex items-center justify-center cursor-pointer shadow-sm  transition-transform active:scale-95 shrink-0"
           >
             {isLoading && !isPlaying ? (
               <Loader2 className="w-5 h-5 animate-spin" />
@@ -289,20 +291,20 @@ export const MeetingAudioPlayer: React.FC<MeetingAudioPlayerProps> = ({
           <button
             onClick={() => skipSeconds(5)}
             title="Forward 5 seconds"
-            className="p-2 rounded-xl text-slate-400 hover:text-white hover:bg-[#18181b] transition-colors cursor-pointer"
+            className="p-2 rounded-xl text-muted hover:text-ink hover:bg-surface transition-colors cursor-pointer"
           >
             <RotateCw className="w-4 h-4" />
           </button>
 
           {/* Time & State Labels */}
           <div className="space-y-0.5 min-w-[120px]">
-            <div className="text-xs font-bold text-white flex items-center gap-1.5">
+            <div className="text-sm font-bold text-ink flex items-center gap-1.5">
               <span>Meeting Audio</span>
               {isPlaying && (
                 <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
               )}
             </div>
-            <div className="text-xs font-mono font-bold text-slate-300">
+            <div className="text-sm font-mono font-bold text-ink">
               {formatTimeSeconds(currentTime)} / {formatTimeSeconds(effectiveDuration)}
             </div>
           </div>
@@ -312,10 +314,10 @@ export const MeetingAudioPlayer: React.FC<MeetingAudioPlayerProps> = ({
         <div className="flex-1 w-full flex items-center gap-3">
           <div className="relative w-full flex items-center">
             {/* Background Track */}
-            <div className="absolute left-0 right-0 h-2 bg-[#18181b] rounded-full border border-[#27272A] overflow-hidden">
+            <div className="absolute left-0 right-0 h-2 bg-surface rounded-full border border-line overflow-hidden">
               {/* Progress Fill */}
               <div
-                className="h-full bg-gradient-to-r from-[#8B5CF6] to-indigo-500 rounded-full transition-all duration-75"
+                className="h-full bg-brand-soft rounded-full transition-all duration-75"
                 style={{ width: `${progressPercent}%` }}
               />
             </div>
@@ -340,21 +342,21 @@ export const MeetingAudioPlayer: React.FC<MeetingAudioPlayerProps> = ({
           <div className="relative">
             <button
               onClick={() => setShowSpeedMenu(!showSpeedMenu)}
-              className="px-2.5 py-1.5 rounded-lg bg-[#18181b] hover:bg-[#27272A] text-slate-300 hover:text-white border border-[#27272A] text-xs font-mono font-bold transition-colors cursor-pointer flex items-center gap-1"
+              className="px-2.5 py-1.5 rounded-lg bg-surface hover:bg-line text-ink hover:text-ink border border-line text-sm font-mono font-bold transition-colors cursor-pointer flex items-center gap-1"
             >
               <span>{playbackRate}x</span>
             </button>
 
             {showSpeedMenu && (
-              <div className="absolute right-0 bottom-full mb-2 w-24 bg-[#18181b] border border-[#27272A] rounded-xl shadow-2xl p-1 z-50 animate-fadeIn">
+              <div className="absolute right-0 bottom-full mb-2 w-24 bg-surface border border-line rounded-xl shadow-sm p-1 z-50 animate-fadeIn">
                 {PLAYBACK_RATES.map((rate) => (
                   <button
                     key={rate}
                     onClick={() => handleRateChange(rate)}
-                    className={`w-full text-left px-2.5 py-1 text-xs font-mono rounded-lg transition-colors cursor-pointer ${
+                    className={`w-full text-left px-2.5 py-1 text-sm font-mono rounded-lg transition-colors cursor-pointer ${
                       playbackRate === rate
-                        ? 'bg-[#8B5CF6] text-white font-bold'
-                        : 'text-slate-300 hover:bg-[#27272A] hover:text-white'
+                        ? 'bg-brand text-on-brand font-bold'
+                        : 'text-ink hover:bg-line hover:text-ink'
                     }`}
                   >
                     {rate}x
@@ -368,10 +370,10 @@ export const MeetingAudioPlayer: React.FC<MeetingAudioPlayerProps> = ({
           <div className="flex items-center gap-2">
             <button
               onClick={toggleMute}
-              className="p-1.5 rounded-lg text-slate-400 hover:text-white transition-colors cursor-pointer"
+              className="p-1.5 rounded-lg text-muted hover:text-ink transition-colors cursor-pointer"
             >
               {isMuted || volume === 0 ? (
-                <VolumeX className="w-4 h-4 text-rose-400" />
+                <VolumeX className="w-4 h-4 text-rose-700" />
               ) : (
                 <Volume2 className="w-4 h-4" />
               )}
@@ -383,14 +385,14 @@ export const MeetingAudioPlayer: React.FC<MeetingAudioPlayerProps> = ({
               step={0.05}
               value={isMuted ? 0 : volume}
               onChange={handleVolumeChange}
-              className="w-16 accent-[#8B5CF6] h-1.5 bg-[#18181b] rounded-lg cursor-pointer hidden md:inline-block"
+              className="w-16 accent-brand h-1.5 bg-surface rounded-lg cursor-pointer hidden md:inline-block"
               aria-label="Volume slider"
             />
           </div>
         </div>
       </div>
-      {audioError && <p role="alert" className="text-xs text-rose-400">{audioError}</p>}
-      {!!segments.length && <div className="flex flex-wrap gap-4 text-xs text-slate-400">
+      {audioError && <p role="alert" className="text-sm text-rose-700">{audioError}</p>}
+      {!!segments.length && <div className="flex flex-wrap gap-4 text-sm text-muted">
         <label className="flex items-center gap-2 cursor-pointer" title="Uses saved speech timestamps with padding. Untranscribed sound may be skipped; turn off to hear the original recording."><input type="checkbox" checked={skipSilence} onChange={e => setSkipSilence(e.target.checked)} className="accent-violet-500" />Skip silence (transcript gaps)</label>
         <label className="flex items-center gap-2 cursor-pointer" title="Adjusts your selected speed using approximate words per minute; turn off to keep a fixed speed."><input type="checkbox" checked={adaptiveSpeed} onChange={e => setAdaptiveSpeed(e.target.checked)} className="accent-violet-500" />Adaptive speed</label>
       </div>}

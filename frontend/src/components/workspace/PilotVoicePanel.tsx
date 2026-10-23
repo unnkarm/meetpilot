@@ -169,29 +169,29 @@ export function PilotVoicePanel({ meetingId, getToken, isLive = false }: {
     }
   };
 
-  return <div className="p-4 rounded-xl border border-purple-500/30 bg-[#111113] space-y-2">
+  return <div className="p-4 rounded-xl border border-brand/30 bg-surface space-y-2">
     <div className="flex items-center justify-between gap-3">
-      <div><strong className="text-white">Pilot voice</strong><p className="text-xs text-slate-400">Say “Pilot”, then ask in English, Bengali or Hindi. You can follow up after its reply.</p></div>
-      <button type="button" disabled={status === 'Starting'} onClick={session.current ? stop : start} className="px-4 py-2 rounded-lg bg-purple-600 text-white text-sm disabled:opacity-50">
+      <div><strong className="text-ink">Pilot voice</strong><p className="text-sm text-muted">Say “Pilot”, then ask in English, Bengali or Hindi. You can follow up after its reply.</p></div>
+      <button type="button" disabled={status === 'Starting'} onClick={session.current ? stop : start} className="px-4 py-2 rounded-lg bg-brand text-on-brand text-sm disabled:opacity-50">
         {session.current ? 'Stop Pilot' : 'Start Pilot'}
       </button>
     </div>
-    <label className="block text-xs text-slate-300">Listen through
-      <select value={inputSource} disabled={!!session.current} onChange={event => setInputSource(event.target.value as 'microphone' | 'meeting')} className="ml-2 rounded bg-[#27272A] p-1 text-white">
+    <label className="block text-sm text-ink">Listen through
+      <select value={inputSource} disabled={!!session.current} onChange={event => setInputSource(event.target.value as 'microphone' | 'meeting')} className="ml-2 rounded bg-line p-1 text-ink">
         <option value="microphone">My microphone</option>
         <option value="meeting" disabled={!isLive}>Meeting bot (live calls)</option>
       </select>
     </label>
-    <p className="text-xs text-slate-400" aria-live="polite">{STATE_LABELS[status] || status}</p>
-    {transcript && <p className="text-sm text-slate-300" title={transcript}>{partial ? 'Hearing' : 'Heard'}: {displayText(transcript)}{partial ? ' …' : ''}</p>}
-    {answer && <p className="text-sm text-white whitespace-pre-line">Pilot: {displayText(answer)}</p>}
-    {citations.length > 0 && <details className="text-xs text-slate-400">
+    <p className="text-sm text-muted" aria-live="polite">{STATE_LABELS[status] || status}</p>
+    {transcript && <p className="text-sm text-ink" title={transcript}>{partial ? 'Hearing' : 'Heard'}: {displayText(transcript)}{partial ? ' …' : ''}</p>}
+    {answer && <p className="text-sm text-ink whitespace-pre-line">Pilot: {displayText(answer)}</p>}
+    {citations.length > 0 && <details className="text-sm text-muted">
       <summary className="cursor-pointer">Sources ({citations.length})</summary>
       <ul className="mt-2 space-y-2">{citations.map((citation, index) => <li key={index}>
-        <span className="text-slate-300">{citation.speaker || citation.title || citation.filename || 'Meeting evidence'}{citation.timestamp ? ` · ${citation.timestamp}` : typeof citation.start_time === 'number' ? ` · ${timestamp(citation.start_time)}` : ''}</span>
+        <span className="text-ink">{citation.speaker || citation.title || citation.filename || 'Meeting evidence'}{citation.timestamp ? ` · ${citation.timestamp}` : typeof citation.start_time === 'number' ? ` · ${timestamp(citation.start_time)}` : ''}</span>
         {citation.snippet && <p className="mt-1">“{displayText(citation.snippet)}”</p>}
       </li>)}</ul>
     </details>}
-    {error && <p className="text-sm text-red-400" role="alert">{error}</p>}
+    {error && <p className="text-sm text-red-700" role="alert">{error}</p>}
   </div>;
 }

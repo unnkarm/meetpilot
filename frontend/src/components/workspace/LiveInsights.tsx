@@ -43,18 +43,18 @@ export function LiveInsights({ meetingId, getToken }: {
     return () => { cancelled = true; socket?.close(); };
   }, [meetingId, getToken]);
 
-  return <section className="rounded-xl border border-purple-500/30 bg-[#111113] p-4 space-y-3">
+  return <section className="rounded-xl border border-brand/30 bg-surface p-4 space-y-3">
     <div className="flex items-center justify-between">
-      <h3 className="font-semibold text-white">Live co-pilot insights</h3>
-      <span className="text-xs text-slate-400">{connected ? 'Listening' : 'Connecting'}</span>
+      <h3 className="font-semibold text-ink">Live co-pilot insights</h3>
+      <span className="text-sm text-muted">{connected ? 'Listening' : 'Connecting'}</span>
     </div>
-    <p className="text-xs text-purple-300" role="status">{botStatus}</p>
-    {insights.length === 0 && <p className="text-xs text-slate-400">Evidence-linked alerts will appear as the meeting progresses.</p>}
-    {insights.map(item => <div key={`${item.kind}:${item.source_segment_id}`} className="border-t border-[#27272A] pt-2">
-      <p className="text-sm text-white">{displayText(item.text)}</p>
-      <p className="text-xs text-slate-400">{item.speaker} · {Math.floor(item.timestamp / 60).toString().padStart(2, '0')}:{Math.floor(item.timestamp % 60).toString().padStart(2, '0')}</p>
-      <p className="text-xs text-slate-300" title={item.source_quote}>“{displayText(item.source_quote)}”</p>
-      {item.related_source && <p className="text-xs text-purple-300">Related: {item.related_source.title || 'Workspace knowledge'}{item.related_source.timestamp ? ` · ${item.related_source.timestamp}` : ''}{item.related_source.speaker ? ` · ${item.related_source.speaker}` : ''}</p>}
+    <p className="text-sm text-brand" role="status">{botStatus}</p>
+    {insights.length === 0 && <p className="text-sm text-muted">Evidence-linked alerts will appear as the meeting progresses.</p>}
+    {insights.map(item => <div key={`${item.kind}:${item.source_segment_id}`} className="border-t border-line pt-2">
+      <p className="text-sm text-ink">{displayText(item.text)}</p>
+      <p className="text-sm text-muted">{item.speaker} · {Math.floor(item.timestamp / 60).toString().padStart(2, '0')}:{Math.floor(item.timestamp % 60).toString().padStart(2, '0')}</p>
+      <p className="text-sm text-ink" title={item.source_quote}>“{displayText(item.source_quote)}”</p>
+      {item.related_source && <p className="text-sm text-brand">Related: {item.related_source.title || 'Workspace knowledge'}{item.related_source.timestamp ? ` · ${item.related_source.timestamp}` : ''}{item.related_source.speaker ? ` · ${item.related_source.speaker}` : ''}</p>}
     </div>)}
   </section>;
 }

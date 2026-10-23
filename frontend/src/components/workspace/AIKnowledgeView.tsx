@@ -1,4 +1,6 @@
+import { Modal } from '../Modal';
 import React, { useState, useRef, useEffect } from 'react';
+import { useWorkspaceManager } from '../../utils/workspacePermissions';
 import {
   Brain,
   Upload,
@@ -47,6 +49,7 @@ export const AIKnowledgeView: React.FC<AIKnowledgeViewProps> = ({
   onNavigateToMeeting,
   showToast,
 }) => {
+  const canManage = useWorkspaceManager();
   const workspaceId = activeWorkspace?.id || null;
   const { data: documents, mutate: mutateDocs, isLoading: docsLoading } = useWorkspaceDocuments(
     workspaceId,
@@ -58,7 +61,7 @@ export const AIKnowledgeView: React.FC<AIKnowledgeViewProps> = ({
       id: 'welcome',
       role: 'assistant',
       content:
-        'Hello! I am your MeetPilot Workspace Knowledge Assistant. I have grounded access to your uploaded company documents and meeting transcripts. Ask me anything about your product roadmap, engineering specs, policies, or past meeting discussions!',
+        'Ask a question about your team’s documents or past meetings. I’ll include sources when the workspace has supporting evidence.',
       time: 'Just now',
     },
   ]);
@@ -124,6 +127,7 @@ export const AIKnowledgeView: React.FC<AIKnowledgeViewProps> = ({
   };
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (!canManage) return;
     const files = e.target.files;
     if (!files || files.length === 0 || !workspaceId) return;
 
@@ -152,6 +156,7 @@ export const AIKnowledgeView: React.FC<AIKnowledgeViewProps> = ({
   };
 
   const handleDeleteDocument = async (doc: ApiKnowledgeDocument) => {
+    if (!canManage) return;
     if (!confirm(`Are you sure you want to delete '${doc.filename}' and all its indexed chunks?`)) return;
 
     try {
@@ -174,15 +179,15 @@ export const AIKnowledgeView: React.FC<AIKnowledgeViewProps> = ({
   const getFileIcon = (fileType: string) => {
     switch (fileType.toLowerCase()) {
       case 'pdf':
-        return <FileText className="w-5 h-5 text-rose-400 shrink-0" />;
+        return <FileText className="w-5 h-5 text-rose-700 shrink-0" />;
       case 'docx':
       case 'doc':
-        return <FileText className="w-5 h-5 text-sky-400 shrink-0" />;
+        return <FileText className="w-5 h-5 text-sky-700 shrink-0" />;
       case 'md':
       case 'markdown':
-        return <FileCode className="w-5 h-5 text-emerald-400 shrink-0" />;
+        return <FileCode className="w-5 h-5 text-emerald-700 shrink-0" />;
       default:
-        return <BookOpen className="w-5 h-5 text-purple-400 shrink-0" />;
+        return <BookOpen className="w-5 h-5 text-brand shrink-0" />;
     }
   };
 
@@ -193,23 +198,23 @@ export const AIKnowledgeView: React.FC<AIKnowledgeViewProps> = ({
   };
 
   return (
-    <div className="flex-1 flex flex-col lg:flex-row overflow-hidden bg-[#0A0A0B]">
+    <div className="mp-knowledge-layout flex flex-col lg:flex-row overflow-hidden">
       {/* LEFT AREA: AI Knowledge Assistant Chat */}
-      <div className="flex-1 flex flex-col border-r border-[#27272A] min-w-0 h-full">
+      <div className="flex-1 flex flex-col border-r border-line min-w-0 h-full">
         {/* Chat Header */}
-        <div className="p-4 border-b border-[#27272A] bg-[#111113]/80 backdrop-blur flex items-center justify-between">
+        <div className="p-4 border-b border-line bg-surface/80 backdrop-blur flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-[#8B5CF6]/30 to-[#3B82F6]/20 border border-[#8B5CF6]/30 flex items-center justify-center">
-              <Brain className="w-5 h-5 text-[#8B5CF6]" />
+            <div className="w-9 h-9 rounded-xl bg-brand-soft border border-brand/30 flex items-center justify-center">
+              <Brain className="w-5 h-5 text-brand" />
             </div>
             <div>
               <div className="flex items-center gap-2">
-                <h1 className="text-sm font-bold text-white">Workspace AI Assistant</h1>
-                <span className="px-2 py-0.5 rounded-full text-[10px] font-mono bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
-                  RAG Active
+                <h1 className="text-sm font-bold text-ink">Ask your workspace</h1>
+                <span className="px-2 py-0.5 rounded-full text-sm font-mono bg-emerald-500/10 text-emerald-700 border border-emerald-500/20">
+                  With sources
                 </span>
               </div>
-              <p className="text-xs text-slate-400">
+              <p className="text-sm text-muted">
                 Grounded on {documents?.length || 0} company document(s) & workspace meeting transcripts
               </p>
             </div>
@@ -227,7 +232,7 @@ export const AIKnowledgeView: React.FC<AIKnowledgeViewProps> = ({
               ])
             }
             title="Clear Chat History"
-            className="p-2 rounded-lg bg-[#18181b] hover:bg-[#27272A] text-slate-400 hover:text-white text-xs flex items-center gap-1.5 transition-colors cursor-pointer"
+            className="p-2 rounded-lg bg-surface hover:bg-line text-muted hover:text-ink text-sm flex items-center gap-1.5 transition-colors cursor-pointer"
           >
             <RefreshCw className="w-3.5 h-3.5" />
             <span className="hidden sm:inline">New Chat</span>
@@ -242,45 +247,45 @@ export const AIKnowledgeView: React.FC<AIKnowledgeViewProps> = ({
               className={`flex gap-3 ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
             >
               {msg.role === 'assistant' && (
-                <div className="w-8 h-8 rounded-xl bg-[#8B5CF6]/20 border border-[#8B5CF6]/40 flex items-center justify-center shrink-0 mt-0.5">
-                  <Sparkles className="w-4 h-4 text-[#8B5CF6]" />
+                <div className="w-8 h-8 rounded-xl bg-brand/20 border border-brand/40 flex items-center justify-center shrink-0 mt-0.5">
+                  <Sparkles className="w-4 h-4 text-brand" />
                 </div>
               )}
 
               <div
-                className={`max-w-[85%] sm:max-w-[75%] rounded-2xl p-4 text-xs leading-relaxed ${
+                className={`max-w-[85%] sm:max-w-[75%] rounded-xl p-4 text-sm leading-relaxed ${
                   msg.role === 'user'
-                    ? 'bg-[#8B5CF6] text-white font-medium rounded-tr-sm shadow-md shadow-[#8B5CF6]/20'
-                    : 'bg-[#18181b] border border-[#27272A] text-slate-200 rounded-tl-sm'
+                    ? 'bg-brand text-on-brand font-medium rounded-tr-sm shadow-md '
+                    : 'bg-surface border border-line text-ink rounded-tl-sm'
                 }`}
               >
                 <div className="whitespace-pre-wrap">{msg.content}</div>
 
-                {/* Grounded Source Citations */}
+                {/* Sources */}
                 {msg.citations && msg.citations.length > 0 && (
-                  <div className="mt-3 pt-3 border-t border-[#27272A] space-y-2">
-                    <div className="text-[10px] font-mono uppercase text-[#8B5CF6] font-bold flex items-center gap-1">
-                      <Layers className="w-3 h-3" /> Grounded Source Citations ({msg.citations.length})
+                  <div className="mt-3 pt-3 border-t border-line space-y-2">
+                    <div className="text-sm font-mono uppercase text-brand font-bold flex items-center gap-1">
+                      <Layers className="w-3 h-3" /> Sources ({msg.citations.length})
                     </div>
                     <div className="flex flex-wrap gap-2">
                       {msg.citations.map((cite, idx) => (
-                        <div
+                        <button type="button"
                           key={idx}
                           onClick={() => {
-                            if (cite.type === 'meeting' && cite.meeting_id && onNavigateToMeeting) {
+                            if (cite.meeting_id && onNavigateToMeeting) {
                               onNavigateToMeeting(cite.meeting_id, parseTimestampToSeconds(cite.timestamp));
                             } else {
                               setSelectedDocForPreview(cite);
                             }
                           }}
-                          className="group px-2.5 py-1.5 rounded-lg bg-[#27272A]/70 hover:bg-[#8B5CF6]/20 border border-[#3f3f46] hover:border-[#8B5CF6]/50 text-[11px] text-slate-300 hover:text-white flex items-center gap-1.5 cursor-pointer transition-all"
+                          className="group px-2.5 py-1.5 rounded-lg bg-line/70 hover:bg-brand/20 border border-line hover:border-brand/50 text-sm text-ink hover:text-ink flex items-center gap-1.5 cursor-pointer transition-all"
                         >
-                          {cite.type === 'meeting' ? (
+                          {cite.meeting_id ? (
                             <>
-                              <Mic className="w-3 h-3 text-rose-400 shrink-0" />
-                              <span className="font-semibold text-rose-300">🎙️ {cite.title}</span>
+                              <Mic className="w-3 h-3 text-rose-700 shrink-0" />
+                              <span className="font-semibold text-brand">{cite.title}</span>
                               {cite.timestamp && (
-                                <span className="font-mono text-[10px] text-slate-400 group-hover:text-white">
+                                <span className="font-mono text-sm text-muted group-hover:text-ink">
                                   @{cite.timestamp}
                                 </span>
                               )}
@@ -288,33 +293,33 @@ export const AIKnowledgeView: React.FC<AIKnowledgeViewProps> = ({
                             </>
                           ) : (
                             <>
-                              <FileText className="w-3 h-3 text-sky-400 shrink-0" />
-                              <span className="font-semibold text-sky-300">📄 {cite.title}</span>
+                              <FileText className="w-3 h-3 text-sky-700 shrink-0" />
+                              <span className="font-semibold text-sky-700">{cite.title}</span>
                               {cite.page_number && (
-                                <span className="font-mono text-[10px] text-slate-400 group-hover:text-white">
+                                <span className="font-mono text-sm text-muted group-hover:text-ink">
                                   (p. {cite.page_number})
                                 </span>
                               )}
                             </>
                           )}
-                        </div>
+                        </button>
                       ))}
                     </div>
                   </div>
                 )}
 
-                <div className="mt-2 text-[10px] opacity-60 text-right">{msg.time}</div>
+                <div className="mt-2 text-sm opacity-60 text-right">{msg.time}</div>
               </div>
             </div>
           ))}
 
           {isSending && (
             <div className="flex gap-3 items-start">
-              <div className="w-8 h-8 rounded-xl bg-[#8B5CF6]/20 border border-[#8B5CF6]/40 flex items-center justify-center shrink-0 animate-pulse">
-                <Sparkles className="w-4 h-4 text-[#8B5CF6]" />
+              <div className="w-8 h-8 rounded-xl bg-brand/20 border border-brand/40 flex items-center justify-center shrink-0 animate-pulse">
+                <Sparkles className="w-4 h-4 text-brand" />
               </div>
-              <div className="p-3.5 rounded-2xl bg-[#18181b] border border-[#27272A] text-xs text-slate-400 flex items-center gap-2">
-                <div className="w-2 h-2 rounded-full bg-[#8B5CF6] animate-ping" />
+              <div className="p-3.5 rounded-xl bg-surface border border-line text-sm text-muted flex items-center gap-2">
+                <div className="w-2 h-2 rounded-full bg-brand " />
                 Searching pgvector workspace embeddings & synthesizing grounded response...
               </div>
             </div>
@@ -326,16 +331,16 @@ export const AIKnowledgeView: React.FC<AIKnowledgeViewProps> = ({
         {/* Suggested Starter Prompts */}
         {chatMessages.length <= 1 && (
           <div className="px-4 pb-2">
-            <div className="text-[11px] font-mono text-slate-500 mb-2 uppercase">Suggested Inquiries</div>
+            <div className="text-sm font-mono text-muted mb-2 uppercase">Suggested Inquiries</div>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
               {suggestedPrompts.map((prompt, idx) => (
                 <button
                   key={idx}
                   onClick={() => handleSendMessage(prompt)}
-                  className="p-2.5 rounded-xl bg-[#18181b] hover:bg-[#27272A] border border-[#27272A] hover:border-[#8B5CF6]/40 text-left text-xs text-slate-300 hover:text-white transition-all cursor-pointer flex items-center justify-between"
+                  className="p-2.5 rounded-xl bg-surface hover:bg-line border border-line hover:border-brand/40 text-left text-sm text-ink hover:text-ink transition-all cursor-pointer flex items-center justify-between"
                 >
                   <span className="truncate pr-2">{prompt}</span>
-                  <ChevronRight className="w-3.5 h-3.5 text-slate-500 shrink-0" />
+                  <ChevronRight className="w-3.5 h-3.5 text-muted shrink-0" />
                 </button>
               ))}
             </div>
@@ -343,7 +348,7 @@ export const AIKnowledgeView: React.FC<AIKnowledgeViewProps> = ({
         )}
 
         {/* Chat Input Bar */}
-        <div className="p-4 border-t border-[#27272A] bg-[#111113]/80">
+        <div className="p-4 border-t border-line bg-surface/80">
           <form
             onSubmit={(e) => {
               e.preventDefault();
@@ -355,14 +360,14 @@ export const AIKnowledgeView: React.FC<AIKnowledgeViewProps> = ({
               type="text"
               value={chatInput}
               onChange={(e) => setChatInput(e.target.value)}
-              placeholder="Ask anything about your workspace documents or meeting discussions..."
+              aria-label="Ask workspace knowledge" placeholder="Ask anything about your workspace documents or meeting discussions..."
               disabled={isSending}
-              className="flex-1 px-4 py-3 rounded-xl bg-[#18181b] border border-[#27272A] text-xs text-white placeholder-slate-500 focus:outline-none focus:border-[#8B5CF6] transition-colors"
+              className="flex-1 px-4 py-3 rounded-xl bg-surface border border-line text-sm text-ink placeholder-slate-500 focus:outline-none focus:border-brand transition-colors"
             />
             <button
               type="submit"
               disabled={isSending || !chatInput.trim()}
-              className="px-4 py-3 rounded-xl bg-[#8B5CF6] hover:bg-[#7c3aed] disabled:opacity-50 text-white text-xs font-bold flex items-center gap-2 transition-all cursor-pointer shadow-lg shadow-[#8B5CF6]/20 shrink-0"
+              className="px-4 py-3 rounded-xl bg-brand hover:bg-brand disabled:opacity-50 text-on-brand text-sm font-bold flex items-center gap-2 transition-all cursor-pointer shadow-sm  shrink-0"
             >
               <Send className="w-4 h-4" />
               <span className="hidden sm:inline">Ask AI</span>
@@ -372,21 +377,21 @@ export const AIKnowledgeView: React.FC<AIKnowledgeViewProps> = ({
       </div>
 
       {/* RIGHT AREA: Workspace Document Knowledge Base Manager */}
-      <div className="w-full lg:w-96 flex flex-col bg-[#111113] h-full">
+      <div className="w-full lg:w-96 flex flex-col bg-surface h-full">
         {/* Knowledge Base Header */}
-        <div className="p-4 border-b border-[#27272A] flex items-center justify-between">
+        <div className="p-4 border-b border-line flex items-center justify-between">
           <div>
             <div className="flex items-center gap-2">
-              <BookOpen className="w-4 h-4 text-[#8B5CF6]" />
-              <h2 className="text-sm font-bold text-white">Company Knowledge</h2>
+              <BookOpen className="w-4 h-4 text-brand" />
+              <h2 className="text-sm font-bold text-ink">Documents</h2>
             </div>
-            <p className="text-[11px] text-slate-400">PDF, DOCX, TXT, Markdown files</p>
+            <p className="text-sm text-muted">{canManage ? 'PDF, DOCX, TXT, Markdown files' : 'Use shared knowledge · documents are managed by your manager'}</p>
           </div>
 
           <button
             onClick={() => fileInputRef.current?.click()}
-            disabled={isUploading}
-            className="px-3 py-1.5 rounded-lg bg-[#8B5CF6] hover:bg-[#7c3aed] text-white text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer shadow-md shadow-[#8B5CF6]/20"
+            disabled={isUploading || !canManage} aria-label="Upload knowledge documents"
+            className="px-3 py-1.5 rounded-lg bg-brand hover:bg-brand text-on-brand text-sm font-bold flex items-center gap-1.5 transition-all cursor-pointer shadow-md "
           >
             <Plus className="w-3.5 h-3.5" />
             <span>Upload</span>
@@ -403,7 +408,7 @@ export const AIKnowledgeView: React.FC<AIKnowledgeViewProps> = ({
 
         {/* Upload Progress Alert */}
         {uploadProgress && (
-          <div className="p-3 bg-[#8B5CF6]/10 border-b border-[#8B5CF6]/30 text-xs text-[#8B5CF6] flex items-center gap-2">
+          <div className="p-3 bg-brand/10 border-b border-brand/30 text-sm text-brand flex items-center gap-2">
             <RefreshCw className="w-3.5 h-3.5 animate-spin shrink-0" />
             <span className="truncate">{uploadProgress}</span>
           </div>
@@ -412,19 +417,20 @@ export const AIKnowledgeView: React.FC<AIKnowledgeViewProps> = ({
         {/* Document List */}
         <div className="flex-1 overflow-y-auto p-4 space-y-3">
           {docsLoading ? (
-            <div className="text-center py-8 text-xs text-slate-500">Loading workspace documents...</div>
+            <div className="text-center py-8 text-sm text-muted">Loading workspace documents...</div>
           ) : !documents || documents.length === 0 ? (
-            <div className="text-center py-12 px-4 border border-dashed border-[#27272A] rounded-2xl">
-              <div className="w-12 h-12 rounded-2xl bg-[#18181b] border border-[#27272A] flex items-center justify-center mx-auto mb-3">
-                <Upload className="w-6 h-6 text-slate-500" />
+            <div className="text-center py-12 px-4 border border-dashed border-line rounded-xl">
+              <div className="w-12 h-12 rounded-xl bg-surface border border-line flex items-center justify-center mx-auto mb-3">
+                <Upload className="w-6 h-6 text-muted" />
               </div>
-              <h3 className="text-xs font-bold text-white mb-1">Your workspace knowledge base is empty</h3>
-              <p className="text-[11px] text-slate-400 mb-4 max-w-xs mx-auto">
+              <h3 className="text-sm font-bold text-ink mb-1">Your workspace knowledge base is empty</h3>
+              <p className="text-sm text-muted mb-4 max-w-xs mx-auto">
                 Upload company documents, product roadmaps, policies, or specifications to empower your AI assistant with workspace memory.
               </p>
               <button
+                disabled={!canManage}
                 onClick={() => fileInputRef.current?.click()}
-                className="px-3.5 py-2 rounded-xl bg-[#8B5CF6] hover:bg-[#7c3aed] text-white text-xs font-bold inline-flex items-center gap-1.5 transition-colors cursor-pointer"
+                className="px-3.5 py-2 rounded-xl bg-brand hover:bg-brand text-on-brand text-sm font-bold inline-flex items-center gap-1.5 transition-colors cursor-pointer"
               >
                 <Plus className="w-4 h-4" />
                 Upload Documents
@@ -434,16 +440,16 @@ export const AIKnowledgeView: React.FC<AIKnowledgeViewProps> = ({
             documents.map((doc) => (
               <div
                 key={doc.id}
-                className="p-3 rounded-xl bg-[#18181b] border border-[#27272A] hover:border-[#3f3f46] transition-all group"
+                className="p-3 rounded-xl bg-surface border border-line hover:border-line transition-all group"
               >
                 <div className="flex items-start justify-between gap-2">
                   <div className="flex items-start gap-2.5 min-w-0">
                     {getFileIcon(doc.file_type)}
                     <div className="min-w-0">
-                      <div className="text-xs font-bold text-white truncate group-hover:text-[#8B5CF6] transition-colors">
+                      <div className="text-sm font-bold text-ink truncate group-hover:text-brand transition-colors">
                         {doc.title || doc.filename}
                       </div>
-                      <div className="text-[10px] text-slate-500 font-mono flex items-center gap-2 mt-0.5">
+                      <div className="text-sm text-muted font-mono flex items-center gap-2 mt-0.5">
                         <span>{doc.file_type.toUpperCase()}</span>
                         <span>•</span>
                         <span>{formatFileSize(doc.file_size)}</span>
@@ -452,36 +458,37 @@ export const AIKnowledgeView: React.FC<AIKnowledgeViewProps> = ({
                   </div>
 
                   <button
+                    disabled={!canManage}
                     onClick={() => handleDeleteDocument(doc)}
                     title="Delete document"
-                    className="p-1 rounded-lg text-slate-500 hover:text-rose-400 hover:bg-rose-500/10 transition-colors opacity-60 group-hover:opacity-100 cursor-pointer"
+                    className="p-1 rounded-lg text-muted hover:text-rose-700 hover:bg-rose-500/10 transition-colors opacity-60 group-hover:opacity-100 cursor-pointer"
                   >
                     <Trash2 className="w-3.5 h-3.5" />
                   </button>
                 </div>
 
                 {/* Status & Chunks Strip */}
-                <div className="mt-2.5 pt-2 border-t border-[#27272A] flex items-center justify-between text-[10px]">
+                <div className="mt-2.5 pt-2 border-t border-line flex items-center justify-between text-sm">
                   <div className="flex items-center gap-1.5">
                     {doc.status === 'ready' && (
-                      <span className="flex items-center gap-1 text-emerald-400 font-medium">
+                      <span className="flex items-center gap-1 text-emerald-700 font-medium">
                         <CheckCircle2 className="w-3 h-3" /> Indexed
                       </span>
                     )}
                     {doc.status === 'processing' && (
-                      <span className="flex items-center gap-1 text-amber-400 font-medium animate-pulse">
+                      <span className="flex items-center gap-1 text-amber-700 font-medium animate-pulse">
                         <RefreshCw className="w-3 h-3 animate-spin" /> Indexing
                       </span>
                     )}
                     {doc.status === 'failed' && (
-                      <span className="flex items-center gap-1 text-rose-400 font-medium" title={doc.failure_reason || ''}>
+                      <span className="flex items-center gap-1 text-rose-700 font-medium" title={doc.failure_reason || ''}>
                         <AlertCircle className="w-3 h-3" /> Failed
                       </span>
                     )}
                   </div>
 
-                  <div className="font-mono text-slate-400">
-                    <span className="text-white font-bold">{doc.chunk_count}</span> vector chunks
+                  <div className="font-mono text-muted">
+                    <span className="text-ink font-bold">{doc.chunk_count}</span> vector chunks
                   </div>
                 </div>
               </div>
@@ -492,29 +499,29 @@ export const AIKnowledgeView: React.FC<AIKnowledgeViewProps> = ({
 
       {/* Snippet Preview Modal */}
       {selectedDocForPreview && (
-        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="w-full max-w-lg rounded-2xl bg-[#18181b] border border-[#27272A] p-5 shadow-2xl space-y-4">
-            <div className="flex items-center justify-between border-b border-[#27272A] pb-3">
+        <Modal label="Knowledge source" onClose={() => setSelectedDocForPreview(null)}>
+          <div className="space-y-4">
+            <div className="flex items-center justify-between border-b border-line pb-3">
               <div className="flex items-center gap-2">
-                <FileText className="w-4 h-4 text-sky-400" />
-                <h3 className="text-xs font-bold text-white">{selectedDocForPreview.title}</h3>
+                <FileText className="w-4 h-4 text-sky-700" />
+                <h3 className="text-sm font-bold text-ink">{selectedDocForPreview.title}</h3>
                 {selectedDocForPreview.page_number && (
-                  <span className="text-[10px] font-mono text-slate-400">
+                  <span className="text-sm font-mono text-muted">
                     (Page {selectedDocForPreview.page_number})
                   </span>
                 )}
               </div>
               <button
                 onClick={() => setSelectedDocForPreview(null)}
-                className="text-slate-400 hover:text-white text-xs cursor-pointer"
+                className="text-muted hover:text-ink text-sm cursor-pointer"
               >
                 ✕
               </button>
             </div>
 
             <div>
-              <div className="text-[10px] font-mono uppercase text-slate-500 mb-1">Retrieved Context Snippet</div>
-              <div className="p-3 rounded-xl bg-[#111113] border border-[#27272A] text-xs text-slate-300 font-mono leading-relaxed whitespace-pre-wrap max-h-60 overflow-y-auto">
+              <div className="text-sm font-mono uppercase text-muted mb-1">Retrieved Context Snippet</div>
+              <div className="p-3 rounded-xl bg-surface border border-line text-sm text-ink font-mono leading-relaxed whitespace-pre-wrap max-h-60 overflow-y-auto">
                 {selectedDocForPreview.snippet}
               </div>
             </div>
@@ -522,13 +529,13 @@ export const AIKnowledgeView: React.FC<AIKnowledgeViewProps> = ({
             <div className="flex justify-end">
               <button
                 onClick={() => setSelectedDocForPreview(null)}
-                className="px-4 py-2 rounded-xl bg-[#27272A] hover:bg-[#3f3f46] text-white text-xs font-bold cursor-pointer"
+                className="px-4 py-2 rounded-xl bg-line hover:bg-line text-ink text-sm font-bold cursor-pointer"
               >
                 Close
               </button>
             </div>
           </div>
-        </div>
+        </Modal>
       )}
     </div>
   );

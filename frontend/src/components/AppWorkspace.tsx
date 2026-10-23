@@ -120,10 +120,20 @@ import {
   setClerkUserContext,
   updateMeetingDisplayScript,
 } from '../services/api';
+import { beginIntegrationOAuth } from '../utils/integrationOAuth';
+import { MeetingPrintReport } from './workspace/MeetingPrintReport';
+import { WorkspaceTaskBoard } from './workspace/WorkspaceTaskBoard';
+import { WorkspaceShell, type WorkspaceTab } from './workspace/WorkspaceShell';
+import { WorkspaceOverview } from './workspace/WorkspaceOverview';
+import { MeetingLibrary } from './workspace/MeetingLibrary';
+import { Modal } from './Modal';
 import { LiveMeetingModal } from './LiveMeetingModal';
 import { MeetingHeader } from './workspace/MeetingHeader';
 import { PilotVoicePanel } from './workspace/PilotVoicePanel';
 import { PilotVoiceSettings } from './workspace/PilotVoiceSettings';
+import { AppearanceSettings } from './workspace/AppearanceSettings';
+import { LegalSettings } from './workspace/LegalSettings';
+import { ensurePolicyAcceptance, PolicyActionCancelled } from '../services/legalConsent';
 import { MeetingLanguageSelect, MeetingScriptContext } from './workspace/MeetingLanguageDisplay';
 import { MEETING_LANGUAGES } from '../utils/meetingLanguage';
 import { LiveInsights } from './workspace/LiveInsights';
@@ -152,8 +162,12 @@ interface AppWorkspaceProps {
   onBackToLanding: () => void;
 }
 
-const getAvatar = (name: string, fallback?: string | null) =>
-  fallback || `https://ui-avatars.com/api/?name=${encodeURIComponent(name || 'User')}&background=8B5CF6&color=fff&bold=true`;
+const getAvatar = (name: string, fallback?: string | null) => {
+  if (fallback) return fallback;
+  const initials = (name || 'User').trim().split(/\s+/).slice(0, 2).map(part => part[0]).join('').toUpperCase()
+    .replace(/[&<>"']/g, '');
+  return `data:image/svg+xml,${encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64"><rect width="64" height="64" rx="32" fill="#e6eeea"/><text x="32" y="38" text-anchor="middle" fill="#497061" font-family="Arial,sans-serif" font-size="22">${initials}</text></svg>`)}`;
+};
 
 const formatMeetingDate = (value?: string | null) => {
   if (!value) return 'Recently';
@@ -179,21 +193,11 @@ export const AppWorkspace: React.FC<AppWorkspaceProps> = ({ onBackToLanding }) =
   const { getToken } = useAuth();
   const { signOut } = useClerk();
   const { mutate: mutateCache } = useSWRConfig();
+  const integrationPopup = useRef<Window | null>(null);
   const previousRole = useRef<string | undefined>(undefined);
 
   // Tab State
-  const [activeTab, setActiveTab] = useState<
-    | 'dashboard'
-    | 'meeting'
-    | 'knowledge'
-    | 'search'
-    | 'kanban'
-    | 'analytics'
-    | 'team'
-    | 'integrations'
-    | 'notifications'
-    | 'settings'
-  >('dashboard');
+  const [activeTab, setActiveTab] = useState<WorkspaceTab>('dashboard');
 
   // Active Workspace Selection
   const [activeWorkspaceId, setActiveWorkspaceId] = useState<string | null>(null);
@@ -235,7 +239,7 @@ export const AppWorkspace: React.FC<AppWorkspaceProps> = ({ onBackToLanding }) =
   const [uploading, setUploading] = useState(false);
   const [uploadProgressMsg, setUploadProgressMsg] = useState('');
 
-  // Step C1 & C3: Live Google Meet Capture & Legal Consent State
+  // Live Google Meet capture state; policy acknowledgment is handled once per account.
   const [liveMeetModalOpen, setLiveMeetModalOpen] = useState(false);
   const [retryLiveMeetingUrl, setRetryLiveMeetingUrl] = useState('');
   const [stoppingLiveMeeting, setStoppingLiveMeeting] = useState(false);
@@ -290,6 +294,11 @@ export const AppWorkspace: React.FC<AppWorkspaceProps> = ({ onBackToLanding }) =
     setToastMessage({ type, text });
     setTimeout(() => setToastMessage(null), 4000);
   };
+  const beginAction = (action: () => void) => {
+    void ensurePolicyAcceptance().then(action).catch(error => {
+      if (!(error instanceof PolicyActionCancelled)) showToast(error instanceof Error ? error.message : 'Could not continue.', 'error');
+    });
+  };
 
   // Meeting Rename State
   const [editingMeetingTitle, setEditingMeetingTitle] = useState(false);
@@ -302,7 +311,7 @@ export const AppWorkspace: React.FC<AppWorkspaceProps> = ({ onBackToLanding }) =
   const [savingWorkspaceName, setSavingWorkspaceName] = useState(false);
 
   // Settings subtab
-  const [settingsTab, setSettingsTab] = useState<'profile' | 'workspace' | 'voice' | 'theme' | 'billing'>('profile');
+  const [settingsTab, setSettingsTab] = useState<'profile' | 'workspace' | 'voice' | 'appearance'>('profile');
 
   // Debounce search input (300ms)
   useEffect(() => {
@@ -372,8 +381,8 @@ export const AppWorkspace: React.FC<AppWorkspaceProps> = ({ onBackToLanding }) =
 
   // Fetch workspace members, meetings, workspace tasks, and notifications
   const { data: members, mutate: mutateMembers } = useWorkspaceMembers(activeWorkspace?.id, getToken);
-  const { data: meetings, mutate: mutateMeetings } = useMeetings(activeWorkspace?.id, getToken);
-  const { data: workspaceTaskRows, mutate: mutateTasks } = useWorkspaceTasks(activeWorkspace?.id, getToken);
+  const { data: meetings, error: meetingsError, isLoading: meetingsLoading, mutate: mutateMeetings } = useMeetings(activeWorkspace?.id, getToken);
+  const { data: workspaceTaskRows, error: tasksError, isLoading: tasksLoading, mutate: mutateTasks } = useWorkspaceTasks(activeWorkspace?.id, getToken);
   const workspaceTasks = canManageWorkspace ? workspaceTaskRows : workspaceTaskRows?.filter(task => task.assignee_id === authSession?.user.id);
   const { data: integrations, mutate: mutateIntegrations } = useWorkspaceIntegrations(activeWorkspace?.id, getToken);
   const { data: workspaceAnalytics, mutate: mutateAnalytics } = useWorkspaceAnalytics(activeWorkspace?.id, getToken);
@@ -404,7 +413,7 @@ export const AppWorkspace: React.FC<AppWorkspaceProps> = ({ onBackToLanding }) =
   }, [meetings, selectedMeetingId]);
 
   // Active meeting detail & associated data
-  const { data: meetingDetail, mutate: mutateMeetingDetail } = useMeetingDetail(selectedMeetingId, getToken);
+  const { data: meetingDetail, error: meetingError, isLoading: meetingLoading, mutate: mutateMeetingDetail } = useMeetingDetail(selectedMeetingId, getToken);
   const canManageMeeting = canManageWorkspace || Boolean(authSession?.user.id && meetingDetail?.created_by === authSession.user.id);
   const isMeetingProcessing = isProcessingStatus(meetingDetail?.status);
   const deferMeetingResults = isMeetingProcessing && meetingDetail?.source !== 'live';
@@ -560,7 +569,7 @@ export const AppWorkspace: React.FC<AppWorkspaceProps> = ({ onBackToLanding }) =
       setUploadModalOpen(false);
       setActiveTab('meeting');
       setMeetingSubTab('summary');
-      showToast(`"${title}" uploaded. Speech transcription & analysis queued in Celery!`);
+      showToast(`"${title}" uploaded. Processing has started.`);
     } catch (err: any) {
       showToast(err.message || 'Audio upload failed', 'error');
     } finally {
@@ -577,6 +586,7 @@ export const AppWorkspace: React.FC<AppWorkspaceProps> = ({ onBackToLanding }) =
     setRecordingSeconds(0);
 
     try {
+      await ensurePolicyAcceptance();
       if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
         throw new Error('Microphone recording is not supported in this browser.');
       }
@@ -725,7 +735,7 @@ export const AppWorkspace: React.FC<AppWorkspaceProps> = ({ onBackToLanding }) =
       md += `| Action Item | Assignee | Priority | Due Date | Status |\n`;
       md += `| :--- | :--- | :--- | :--- | :--- |\n`;
       meetingTasks.forEach((t) => {
-        md += `| ${t.title} | ${t.assignee_name || 'Unassigned'} | ${t.priority.toUpperCase()} | ${t.due_date || 'This Week'} | ${t.status.toUpperCase()} |\n`;
+        md += `| ${t.title} | ${t.assignee_name || 'Unassigned'} | ${t.priority.toUpperCase()} | ${t.due_date || 'No deadline'} | ${t.status.toUpperCase()} |\n`;
       });
       md += `\n`;
     }
@@ -928,29 +938,27 @@ export const AppWorkspace: React.FC<AppWorkspaceProps> = ({ onBackToLanding }) =
     }
   };
 
-  // Step C2: Google Calendar Connect
-  const handleConnectGoogleCalendar = async () => {
-    if (!activeWorkspaceId) return;
+  const handleConnectIntegration = async (provider: 'google' | 'zoom') => {
+    if (!activeWorkspaceId || !canManageWorkspace || !user?.id) return;
     try {
-      const { url } = await getGoogleAuthUrlApi(activeWorkspaceId, getToken);
-      window.open(url, '_blank', 'width=600,height=700');
-      showToast('Opening Google Calendar authorization window...');
-    } catch (err: any) {
-      showToast(err.message || 'Failed to initialize Google OAuth', 'error');
-    }
+      await ensurePolicyAcceptance();
+      const attempt = beginIntegrationOAuth(provider, activeWorkspaceId, user.id, getToken);
+      integrationPopup.current = attempt.popup;
+      await attempt.ready;
+      showToast('Complete authorization in the connection window.', 'info');
+    } catch (err) { showToast(err instanceof Error ? err.message : 'Could not start authorization.', 'error'); }
   };
-
-  // Step C3: Zoom Connect
-  const handleConnectZoom = async () => {
-    if (!activeWorkspaceId) return;
-    try {
-      const { url } = await getZoomAuthUrlApi(activeWorkspaceId, getToken);
-      window.open(url, '_blank', 'width=600,height=700');
-      showToast('Opening Zoom authorization window...');
-    } catch (err: any) {
-      showToast(err.message || 'Failed to initialize Zoom OAuth', 'error');
-    }
-  };
+  const handleConnectGoogleCalendar = () => handleConnectIntegration('google');
+  const handleConnectZoom = () => handleConnectIntegration('zoom');
+  useEffect(() => {
+    const connected = (event: MessageEvent) => {
+      if (event.origin !== window.location.origin || event.source !== integrationPopup.current || event.data?.type !== 'meetpilot:integration-connected' || event.data.workspaceId !== activeWorkspaceId || !['google', 'zoom'].includes(event.data.provider)) return;
+      void mutateIntegrations();
+      showToast('Workspace integration connected.');
+    };
+    window.addEventListener('message', connected);
+    return () => window.removeEventListener('message', connected);
+  }, [activeWorkspaceId, mutateIntegrations]);
 
   // Step C3: Open Zoom Cloud Recordings Picker
   const handleOpenZoomPicker = async () => {
@@ -1150,7 +1158,7 @@ export const AppWorkspace: React.FC<AppWorkspaceProps> = ({ onBackToLanding }) =
       meeting_id: selectedMeetingId || '',
       title,
       assignee_name: quickTaskAssignee || user?.fullName || 'Unassigned',
-      due_date: quickTaskDueDate || 'This Week',
+      due_date: quickTaskDueDate || null,
       priority: quickTaskPriority,
       status: 'todo',
     };
@@ -1314,546 +1322,57 @@ export const AppWorkspace: React.FC<AppWorkspaceProps> = ({ onBackToLanding }) =
 
   return (
     <WorkspaceManagerContext.Provider value={canManageWorkspace}>
-    <div className="min-h-screen bg-[#09090B] text-slate-100 flex flex-col font-sans selection:bg-[#8B5CF6]/30 selection:text-white antialiased">
-      {/* Top Header Bar */}
-      <header className="h-16 border-b border-[#27272A] bg-[#111113] px-4 sm:px-6 flex items-center justify-between sticky top-0 z-40">
-        {/* Left Brand & Workspace Switcher */}
-        <div className="flex items-center gap-3 sm:gap-4">
-          <button
-            onClick={onBackToLanding}
-            className="flex items-center justify-center h-10 hover:scale-105 active:scale-95 transition-transform duration-200 cursor-pointer"
-            title="Return to Home / Landing Page"
-          >
-            <MeetPilotLogo className="h-9" iconOnly={true} />
-          </button>
-
-          <div className="h-4 w-px bg-gradient-to-b from-transparent via-[#3F3F50] to-transparent hidden sm:block mx-0.5" />
-
-          {/* Workspace Switcher */}
-          <div className="relative">
-            <button
-              onClick={() => setShowWorkspaceSwitcher(!showWorkspaceSwitcher)}
-              className="group flex items-center gap-2 px-3.5 py-1.5 rounded-xl border border-[#2D2D3B] hover:border-[#8B5CF6]/60 bg-gradient-to-r from-[#181822] to-[#1E1E2A] hover:from-[#20202E] hover:to-[#262638] text-white text-xs font-bold transition-all duration-200 cursor-pointer shadow-sm active:scale-[0.98]"
-            >
-              <span className="max-w-[140px] sm:max-w-[200px] truncate tracking-tight text-white font-bold">
-                {activeWorkspace?.name || 'Loading Workspace...'}
-              </span>
-              {activeWorkspace?.is_demo && <span className="text-[9px] text-amber-300 border border-amber-400/40 rounded px-1">SAMPLE</span>}
-              <ChevronRight
-                className={`w-3.5 h-3.5 text-slate-400 group-hover:text-slate-200 transition-transform duration-200 ${
-                  showWorkspaceSwitcher ? 'rotate-90 text-[#8B5CF6]' : ''
-                }`}
-              />
-            </button>
-
-            {/* Workspace Dropdown Popover */}
-            {showWorkspaceSwitcher && (
-              <div className="absolute left-0 mt-2 w-72 rounded-2xl bg-[#121217]/95 backdrop-blur-xl border border-[#2D2D3B] p-2.5 shadow-2xl shadow-black/80 z-50 space-y-1 animate-fadeIn">
-                <div className="flex items-center justify-between px-3 py-1.5 border-b border-[#27272A] text-[10px] font-mono uppercase text-slate-400">
-                  <span>Your Workspaces</span>
-                  <span>{workspaces?.length || 0}</span>
-                </div>
-
-                <div className="max-h-48 overflow-y-auto space-y-1 py-1">
-                  {workspaces?.map((ws) => (
-                    <button
-                      key={ws.id}
-                      onClick={() => {
-                        setActiveWorkspaceId(ws.id);
-                        setShowWorkspaceSwitcher(false);
-                      }}
-                      className={`w-full text-left px-3 py-2 rounded-xl text-xs flex items-center justify-between transition-colors cursor-pointer ${
-                        ws.id === activeWorkspaceId
-                          ? 'bg-[#8B5CF6] text-white font-bold'
-                          : 'text-slate-300 hover:bg-[#18181b] hover:text-white'
-                      }`}
-                    >
-                      <span className="truncate">{ws.name}</span>
-                      {ws.id === activeWorkspaceId && <Check className="w-3.5 h-3.5" />}
-                    </button>
-                  ))}
-                </div>
-
-                <div className="pt-2 border-t border-[#27272A] space-y-1">
-                  <button onClick={() => { setShowWorkspaceSwitcher(false); setJoinWorkspaceOpen(true); }}
-                    className="w-full rounded-xl bg-violet-600/20 px-3 py-2 text-xs font-bold text-violet-300">Join Workspace with Code</button>
-                  <button
-                    onClick={() => {
-                      setShowWorkspaceSwitcher(false);
-                      setNewWorkspaceModalOpen(true);
-                    }}
-                    className="w-full flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl bg-[#18181b] hover:bg-[#27272A] text-xs font-bold text-[#8B5CF6] transition-colors cursor-pointer"
-                  >
-                    <Plus className="w-3.5 h-3.5" />
-                    <span>Create Workspace</span>
-                  </button>
-
-                  {activeWorkspace && isWorkspaceOwner && (
-                    <button
-                      onClick={() => {
-                        setShowWorkspaceSwitcher(false);
-                        setDeleteConfirmText('');
-                        setDeleteWorkspaceError(null);
-                        setDeleteWorkspaceModalOpen(true);
-                      }}
-                      className="w-full flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-xl text-[11px] font-bold text-red-400 hover:text-red-300 hover:bg-red-950/20 transition-colors cursor-pointer"
-                    >
-                      <Trash2 className="w-3 h-3" />
-                      <span>Delete Active Workspace</span>
-                    </button>
-                  )}
-                </div>
-              </div>
-            )}
-
-          </div>
-        </div>
-
-        {/* Right Header Navigation & Actions */}
-        <div className="flex items-center gap-2 sm:gap-3">
-          {/* Step C1: Join Live Google Meet Button */}
-          <button
-            onClick={() => setLiveMeetModalOpen(true)}
-            className="px-3.5 py-1.5 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white text-xs font-bold flex items-center gap-1.5 cursor-pointer shadow-lg shadow-emerald-500/20 transition-all active:scale-95 border border-emerald-400/30"
-          >
-            <Video className="w-3.5 h-3.5" />
-            <span className="hidden sm:inline">Join Google Meet</span>
-            <span className="inline-flex items-center px-1.5 py-0.2 text-[9px] font-bold uppercase tracking-wider bg-emerald-950/80 border border-emerald-400/40 rounded-md text-emerald-300">
-              Live
-            </span>
-          </button>
-
-          {/* Live Mic Recording Button */}
-          <button
-            onClick={() => {
-              setRecordError(null);
-              setRecordModalOpen(true);
-            }}
-            className="px-3.5 py-1.5 rounded-xl bg-[#18181b] hover:bg-rose-950/30 border border-rose-500/30 hover:border-rose-500/60 text-rose-300 text-xs font-bold flex items-center gap-1.5 cursor-pointer shadow-sm transition-all active:scale-95"
-          >
-            <span className="w-2 h-2 rounded-full bg-rose-500 animate-pulse" />
-            <Mic className="w-3.5 h-3.5 text-rose-400" />
-            <span className="hidden sm:inline">Record Mic</span>
-          </button>
-
-          {/* Quick Upload Button */}
-          <button
-            onClick={() => setUploadModalOpen(true)}
-            className="px-3.5 py-1.5 rounded-xl bg-[#8B5CF6] hover:bg-[#7c3aed] text-white text-xs font-bold flex items-center gap-1.5 cursor-pointer shadow-lg shadow-[#8B5CF6]/20 transition-all active:scale-95"
-          >
-            <Upload className="w-3.5 h-3.5" />
-            <span className="hidden sm:inline">Upload Audio</span>
-          </button>
-
-
-          {/* User Profile Badge */}
-          <div className="flex items-center gap-2 pl-2 border-l border-[#27272A]">
-            <img
-              src={getAvatar(user?.fullName || user?.firstName || 'User', user?.imageUrl)}
-              alt="User"
-              className="w-8 h-8 rounded-full object-cover ring-2 ring-[#8B5CF6]/30"
-            />
-            <div className="hidden md:block text-left">
-              <div className="text-xs font-bold text-white leading-none">{user?.fullName || user?.firstName || 'User'}</div>
-              <div className="text-[10px] text-slate-400 font-mono mt-0.5 truncate max-w-[120px]">
-                {user?.primaryEmailAddress?.emailAddress}
-              </div>
-            </div>
-
-            <button
-              onClick={() => signOut()}
-              title="Sign Out"
-              className="p-1.5 rounded-lg text-slate-400 hover:text-rose-400 hover:bg-rose-500/10 transition-colors ml-1"
-            >
-              <LogOut className="w-4 h-4" />
-            </button>
-          </div>
-        </div>
-      </header>
-
-      {/* Main Workspace Layout */}
-      <div className="flex-1 flex overflow-hidden">
-        {/* Left Sidebar Navigation */}
-        <aside className="w-16 sm:w-56 border-r border-[#27272A] bg-[#111113] p-3 flex flex-col justify-between shrink-0">
-          <nav className="space-y-1">
-            <button
-              onClick={() => setActiveTab('dashboard')}
-              className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-semibold transition-colors cursor-pointer ${
-                activeTab === 'dashboard'
-                  ? 'bg-[#8B5CF6] text-white shadow-md shadow-[#8B5CF6]/20'
-                  : 'text-slate-400 hover:text-white hover:bg-[#18181b]'
-              }`}
-            >
-              <LayoutDashboard className="w-4 h-4 shrink-0" />
-              <span className="hidden sm:inline">Dashboard</span>
-            </button>
-
-            <button
-              onClick={() => setActiveTab('meeting')}
-              className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-semibold transition-colors cursor-pointer ${
-                activeTab === 'meeting'
-                  ? 'bg-[#8B5CF6] text-white shadow-md shadow-[#8B5CF6]/20'
-                  : 'text-slate-400 hover:text-white hover:bg-[#18181b]'
-              }`}
-            >
-              <FileText className="w-4 h-4 shrink-0" />
-              <span className="hidden sm:inline">Meeting Detail</span>
-            </button>
-
-            {/* Primary Divider */}
-            <div className="my-2 border-t border-[#27272A]" />
-
-            {/* 🧠 First-Class AI Knowledge / RAG */}
-            <button
-              onClick={() => setActiveTab('knowledge')}
-              className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-xs font-semibold transition-colors cursor-pointer ${
-                activeTab === 'knowledge'
-                  ? 'bg-[#8B5CF6] text-white shadow-md shadow-[#8B5CF6]/20'
-                  : 'text-slate-400 hover:text-white hover:bg-[#18181b]'
-              }`}
-            >
-              <div className="flex items-center gap-3 min-w-0">
-                <Brain className="w-4 h-4 shrink-0 text-[#a78bfa]" />
-                <span className="hidden sm:inline font-bold">AI Knowledge</span>
-              </div>
-              {workspaceDocs && workspaceDocs.length > 0 && (
-                <span className="hidden sm:inline-block px-1.5 py-0.5 rounded-full text-[9px] font-mono bg-[#27272A] text-slate-300">
-                  {workspaceDocs.length}
-                </span>
-              )}
-            </button>
-
-            {/* 🔎 First-Class Semantic Search */}
-            <button
-              onClick={() => setActiveTab('search')}
-              className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-xs font-semibold transition-colors cursor-pointer ${
-                activeTab === 'search'
-                  ? 'bg-[#8B5CF6] text-white shadow-md shadow-[#8B5CF6]/20'
-                  : 'text-slate-400 hover:text-white hover:bg-[#18181b]'
-              }`}
-            >
-              <div className="flex items-center gap-3 min-w-0">
-                <Search className="w-4 h-4 shrink-0 text-sky-400" />
-                <span className="hidden sm:inline font-bold">Semantic Search</span>
-              </div>
-              <span className="hidden sm:inline-block px-1.5 py-0.5 rounded-full text-[9px] font-mono bg-[#27272A] text-slate-400">
-                pgvector
-              </span>
-            </button>
-
-            {/* Secondary Divider */}
-            <div className="my-2 border-t border-[#27272A]" />
-
-            <button
-              onClick={() => setActiveTab('kanban')}
-              className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-semibold transition-colors cursor-pointer ${
-                activeTab === 'kanban'
-                  ? 'bg-[#8B5CF6] text-white shadow-md shadow-[#8B5CF6]/20'
-                  : 'text-slate-400 hover:text-white hover:bg-[#18181b]'
-              }`}
-            >
-              <Kanban className="w-4 h-4 shrink-0" />
-              <span className="hidden sm:inline">Action Items</span>
-            </button>
-
-            <button
-              onClick={() => setActiveTab('analytics')}
-              className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-semibold transition-colors cursor-pointer ${
-                activeTab === 'analytics'
-                  ? 'bg-[#8B5CF6] text-white shadow-md shadow-[#8B5CF6]/20'
-                  : 'text-slate-400 hover:text-white hover:bg-[#18181b]'
-              }`}
-            >
-              <BarChart3 className="w-4 h-4 shrink-0" />
-              <span className="hidden sm:inline">Analytics</span>
-            </button>
-
-            <div className="pt-4 pb-1 text-[10px] font-mono uppercase text-slate-500 px-3 hidden sm:block">Team & Tools</div>
-
-            <button
-              onClick={() => setActiveTab('team')}
-              className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-semibold transition-colors cursor-pointer ${
-                activeTab === 'team'
-                  ? 'bg-[#8B5CF6] text-white shadow-md shadow-[#8B5CF6]/20'
-                  : 'text-slate-400 hover:text-white hover:bg-[#18181b]'
-              }`}
-            >
-              <Users className="w-4 h-4 shrink-0" />
-              <span className="hidden sm:inline">Team Members</span>
-              {!!pendingJoinRequests?.length && <span className="rounded-full bg-amber-600 px-2 py-0.5 text-white">{pendingJoinRequests.length}</span>}
-            </button>
-
-            <button
-              disabled={!canManageWorkspace}
-              onClick={() => setActiveTab('integrations')}
-              className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-semibold transition-colors cursor-pointer ${
-                activeTab === 'integrations'
-                  ? 'bg-[#8B5CF6] text-white shadow-md shadow-[#8B5CF6]/20'
-                  : 'text-slate-400 hover:text-white hover:bg-[#18181b]'
-              }`}
-            >
-              <Plug className="w-4 h-4 shrink-0" />
-              <span className="hidden sm:inline">Integrations</span>
-            </button>
-
-            <button
-              onClick={() => setActiveTab('notifications')}
-              className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-semibold transition-colors cursor-pointer ${
-                activeTab === 'notifications'
-                  ? 'bg-[#8B5CF6] text-white shadow-md shadow-[#8B5CF6]/20'
-                  : 'text-slate-400 hover:text-white hover:bg-[#18181b]'
-              }`}
-            >
-              <Bell className="w-4 h-4 shrink-0" />
-              <span className="hidden sm:inline">Notifications</span>
-              {notifications && notifications.length > 0 && (
-                <span className="hidden sm:inline-block ml-auto px-1.5 py-0.2 bg-[#8B5CF6] text-white rounded-full text-[10px] font-bold font-mono">
-                  {notifications.length}
-                </span>
-              )}
-            </button>
-          </nav>
-
-          <div className="pt-4 border-t border-[#27272A]">
-            <button
-              onClick={() => setActiveTab('settings')}
-              className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-semibold transition-colors cursor-pointer ${
-                activeTab === 'settings'
-                  ? 'bg-[#8B5CF6] text-white shadow-md shadow-[#8B5CF6]/20'
-                  : 'text-slate-400 hover:text-white hover:bg-[#18181b]'
-              }`}
-            >
-              <Settings className="w-4 h-4 shrink-0" />
-              <span className="hidden sm:inline">Settings</span>
-            </button>
-          </div>
-        </aside>
-
+    <div className="mp-root">
+      {activeTab === 'meeting' && meetingDetail && <MeetingPrintReport meeting={meetingDetail} summary={meetingSummary} decisions={meetingDecisions || []} tasks={meetingTasks || []} transcript={meetingTranscript || []} />}
+      <WorkspaceShell activeTab={activeTab} onNavigate={setActiveTab} workspace={activeWorkspace}
+        workspaces={workspaces || []} manager={canManageWorkspace}
+        onSwitchWorkspace={id => { setSelectedMeetingId(null); setLocalChatMessages([]); setCurrentTime(0); setActiveWorkspaceId(id); setActiveTab('dashboard'); }}
+        onCreateWorkspace={() => setNewWorkspaceModalOpen(true)} onJoinWorkspace={() => setJoinWorkspaceOpen(true)}
+        onHome={onBackToLanding} onSignOut={() => void signOut()}
+        onUpload={() => beginAction(() => setUploadModalOpen(true))} onRecord={() => { setRecordError(null); beginAction(() => setRecordModalOpen(true)); }}
+        onJoinMeeting={() => beginAction(() => setLiveMeetModalOpen(true))} userName={user?.fullName || user?.firstName || 'Your account'}
+        userEmail={user?.primaryEmailAddress?.emailAddress} avatarUrl={user?.imageUrl}
+        pendingRequests={pendingJoinRequests?.length || 0} notificationCount={notifications?.length || 0}>
         {/* Central Workspace Canvas */}
-        <main className="flex-1 overflow-y-auto p-4 sm:p-6 lg:p-8 space-y-6 bg-[#09090B]">
-          {canManageWorkspace && !!pendingJoinRequests?.length && activeTab !== 'team' && <div role="status" className="flex items-center justify-between rounded-xl border border-amber-500/30 bg-amber-950/20 p-4 text-xs text-amber-200"><span>{pendingJoinRequests.length} teammate request(s) waiting for your approval.</span><button onClick={() => setActiveTab('team')} className="rounded-lg bg-amber-700 px-3 py-2 text-white">Review requests</button></div>}
-          {/* TAB 1: DASHBOARD OVERVIEW */}
-          {activeTab === 'dashboard' && (
-            <div className="space-y-6 animate-fadeIn">
-              {/* Dashboard Banner */}
-              <div className="p-6 rounded-2xl bg-[#111113] border border-[#27272A] flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
-                <div className="flex items-center gap-3">
-                  <img
-                    src={getAvatar(user?.fullName || user?.firstName || 'User', user?.imageUrl)}
-                    alt="User"
-                    className="w-12 h-12 rounded-2xl object-cover ring-2 ring-[#8B5CF6]/40"
-                  />
-                  <div>
-                    <h2 className="text-2xl font-extrabold text-white">
-                      {totalMeetingsCount === 0 ? `Welcome to MeetPilot, ${user?.firstName || 'Pilot'}` : `Welcome back, ${user?.firstName || 'Pilot'}`}
-                    </h2>
-                    <p className="text-xs text-slate-400 mt-1">
-                      {activeWorkspace?.name} · {completedMeetingsCount} completed meetings · {pendingTasksList.length} pending action items.
-                    </p>
-                    {activeWorkspace?.is_demo && <p className="text-xs text-amber-300 mt-1">This workspace contains sample data only.</p>}
-                  </div>
-                </div>
-
-                <button
-                  onClick={() => activeWorkspace?.is_demo ? setNewWorkspaceModalOpen(true) : setUploadModalOpen(true)}
-                  className="px-4 py-2 rounded-xl bg-[#8B5CF6] hover:bg-[#7c3aed] text-white font-bold text-xs flex items-center gap-2 cursor-pointer shadow-lg shadow-[#8B5CF6]/20"
-                >
-                  <Upload className="w-4 h-4" />
-                  <span>{activeWorkspace?.is_demo ? 'Create Real Workspace' : 'Upload Meeting Audio'}</span>
-                </button>
-              </div>
-
-              {totalMeetingsCount === 0 && !activeWorkspace?.is_demo && (
-                <div className="p-6 rounded-2xl border border-[#8B5CF6]/35 bg-[#8B5CF6]/10 space-y-3">
-                  <h3 className="text-lg font-bold text-white">Your first meeting is the starting point</h3>
-                  <p className="text-sm text-slate-300">Upload a recording, watch the transcript become a summary and action items, then ask a question backed by the conversation.</p>
-                  <div className="flex flex-wrap gap-3">
-                    <button onClick={() => setUploadModalOpen(true)} className="px-4 py-2 rounded-lg bg-[#8B5CF6] text-white text-xs font-bold">Upload first meeting</button>
-                    <button onClick={handleExploreDemo} disabled={exploringDemo} className="px-4 py-2 rounded-lg border border-[#8B5CF6]/60 text-white text-xs font-bold disabled:opacity-50">
-                      {exploringDemo ? 'Opening sample…' : 'Explore Demo'}</button>
-                  </div>
-                </div>
-              )}
-
-              {/* Stats Overview Grid */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-                <div className="p-4 rounded-xl bg-[#111113] border border-[#27272A] space-y-1">
-                  <div className="text-[11px] font-mono uppercase text-slate-500">Total Meetings</div>
-                  <div className="text-2xl font-extrabold text-white">{totalMeetingsCount}</div>
-                  <div className="text-[10px] text-emerald-400 font-semibold">{completedMeetingsCount} processed live</div>
-                </div>
-
-                <div className="p-4 rounded-xl bg-[#111113] border border-[#27272A] space-y-1">
-                  <div className="text-[11px] font-mono uppercase text-slate-500">Pending Tasks</div>
-                  <div className="text-2xl font-extrabold text-white">{pendingTasksList.length}</div>
-                  <div className="text-[10px] text-[#8B5CF6] font-semibold">
-                    {tasksByStatus.doing.length} currently in progress
-                  </div>
-                </div>
-
-                <div className="p-4 rounded-xl bg-[#111113] border border-[#27272A] space-y-1">
-                  <div className="text-[11px] font-mono uppercase text-slate-500">Speaking Time</div>
-                  <div className="text-2xl font-extrabold text-white">{totalSpeakingHours} hrs</div>
-                  <div className="text-[10px] text-slate-400 font-semibold">
-                    Across {members?.length || 1} team members
-                  </div>
-                </div>
-
-                <div className="p-4 rounded-xl bg-[#111113] border border-[#27272A] space-y-1">
-                  <div className="text-[11px] font-mono uppercase text-slate-500">Completed Tasks</div>
-                  <div className="text-2xl font-extrabold text-white">{tasksByStatus.done.length}</div>
-                  <div className="text-[10px] text-emerald-400 font-semibold">Saved in workspace tasks</div>
-                </div>
-              </div>
-
-              {/* Recent Meetings & Pending Tasks Grid */}
-              <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-                {/* Recent Meetings (7 cols) */}
-                <div className="lg:col-span-7 p-6 rounded-2xl bg-[#111113] border border-[#27272A] space-y-4">
-                  <div className="flex items-center justify-between">
-                    <h3 className="text-sm font-bold text-white uppercase tracking-wider">Recent Meetings</h3>
-                    <span className="text-xs text-slate-500 font-mono">{totalMeetingsCount} Total</span>
-                  </div>
-
-                  {(!meetings || meetings.length === 0) ? (
-                    <div className="p-8 text-center border border-dashed border-[#27272A] rounded-xl space-y-3">
-                      <FileText className="w-8 h-8 text-slate-500 mx-auto" />
-                      <p className="text-xs text-slate-400">No meetings recorded in this workspace yet.</p>
-                      <button
-                        onClick={() => setUploadModalOpen(true)}
-                        className="px-3 py-1.5 rounded-lg bg-[#8B5CF6] text-white text-xs font-bold"
-                      >
-                        Upload Audio
-                      </button>
-                    </div>
-                  ) : (
-                    <div className="space-y-3">
-                      {meetings.slice(0, 5).map((m) => (
-                        <div
-                          key={m.id}
-                          onClick={() => {
-                            setSelectedMeetingId(m.id);
-                            setActiveTab('meeting');
-                          }}
-                          className={`p-4 rounded-xl border cursor-pointer transition-all flex items-center justify-between ${
-                            selectedMeetingId === m.id
-                              ? 'bg-[#18181b] border-[#8B5CF6]'
-                              : 'bg-[#18181b] border-[#27272A] hover:border-[#8B5CF6]/50'
-                          }`}
-                        >
-                          <div className="space-y-1">
-                            <div className="text-sm font-bold text-white flex items-center gap-2">
-                              <span>{m.title}</span>
-                              <span
-                                className={`text-[10px] font-mono px-2 py-0.5 rounded font-bold ${
-                                  m.status === 'completed'
-                                    ? 'bg-emerald-500/20 text-emerald-300'
-                                    : isProcessingStatus(m.status) && m.status !== 'queued'
-                                    ? 'bg-[#8B5CF6]/20 text-[#8B5CF6] animate-pulse'
-                                    : m.status === 'queued'
-                                    ? 'bg-amber-500/20 text-amber-300'
-                                    : 'bg-rose-500/20 text-rose-300'
-                                }`}
-                              >
-                                {m.status}
-                              </span>
-                            </div>
-                            <div className="text-xs text-slate-400 flex items-center gap-3">
-                              <span>{formatMeetingDate(m.created_at)}</span>
-                              <span>•</span>
-                              <span>{formatDuration(m.duration_seconds)}</span>
-                              <span>•</span>
-                              <span>{m.participants.length || 1} participants</span>
-                            </div>
-                          </div>
-
-                          <div className="flex items-center gap-3">
-                            <button
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                handleDeleteMeeting(m.id, m.title);
-                              }}
-                              title={`Delete ${m.title}`}
-                              className="p-2 rounded-xl text-slate-500 hover:text-rose-400 hover:bg-rose-500/10 transition-colors cursor-pointer"
-                            >
-                              <Trash2 className="w-4 h-4" />
-                            </button>
-                            <ChevronRight className="w-4 h-4 text-slate-500" />
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-
-
-                {/* Pending Tasks & Upcoming Deadlines (5 cols) */}
-                <div className="lg:col-span-5 p-6 rounded-2xl bg-[#111113] border border-[#27272A] space-y-4">
-                  <div className="flex items-center justify-between">
-                    <h3 className="text-sm font-bold text-white uppercase tracking-wider">Pending Action Items</h3>
-                    <button onClick={() => setActiveTab('kanban')} className="text-xs text-[#8B5CF6] hover:underline">
-                      View Board
-                    </button>
-                  </div>
-
-                  {pendingTasksList.length === 0 ? (
-                    <div className="p-8 text-center border border-dashed border-[#27272A] rounded-xl space-y-2">
-                      <CheckCircle2 className="w-8 h-8 text-emerald-400 mx-auto" />
-                      <p className="text-xs text-slate-400">All tasks completed! Upload audio to extract new items.</p>
-                    </div>
-                  ) : (
-                    <div className="space-y-2.5">
-                      {pendingTasksList.slice(0, 5).map((t) => (
-                        <div key={t.id} className="p-3 rounded-xl bg-[#18181b] border border-[#27272A] space-y-2">
-                          <div className="flex items-start justify-between gap-2">
-                            <span className="text-xs font-semibold text-white leading-snug">{t.title}</span>
-                            <span
-                              className={`text-[9px] font-mono uppercase px-1.5 py-0.5 rounded font-bold ${
-                                t.priority === 'high'
-                                  ? 'bg-rose-500/20 text-rose-300'
-                                  : t.priority === 'medium'
-                                  ? 'bg-amber-500/20 text-amber-300'
-                                  : 'bg-blue-500/20 text-blue-300'
-                              }`}
-                            >
-                              {t.priority}
-                            </span>
-                          </div>
-                          <div className="flex items-center justify-between text-[11px] text-slate-400">
-                            <span>Assignee: {t.assignee_name || 'Team Member'}</span>
-                            <span className="font-mono text-slate-500">Due: {t.due_date || 'This Week'}</span>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              </div>
-            </div>
-          )}
+        <main id="workspace-content" className="mp-workspace-content space-y-6">
+          {canManageWorkspace && !!pendingJoinRequests?.length && activeTab !== 'team' && <div role="status" className="flex items-center justify-between rounded-xl border border-amber-500/30 bg-amber-50 p-4 text-sm text-amber-700"><span>{pendingJoinRequests.length} teammate request(s) waiting for your approval.</span><button onClick={() => setActiveTab('team')} className="rounded-lg bg-amber-700 px-3 py-2 text-on-brand">Review requests</button></div>}
+          {activeTab === 'dashboard' && <WorkspaceOverview name={user?.firstName || 'there'}
+            meetings={meetings || []} tasks={workspaceTasks || []} loading={meetingsLoading}
+            error={meetingsError?.message} onRetry={() => void mutateMeetings()} manager={canManageWorkspace}
+            isDemo={activeWorkspace.is_demo} onOpen={id => { setSelectedMeetingId(id); setActiveTab('meeting'); setMeetingSubTab('summary'); }}
+            onNavigate={setActiveTab} onJoin={() => beginAction(() => setLiveMeetModalOpen(true))} onUpload={() => beginAction(() => setUploadModalOpen(true))}
+            onDemo={handleExploreDemo} exploringDemo={exploringDemo} documentCount={workspaceDocs?.length || 0} memberCount={members?.length || 0} />}
+          {activeTab === 'meetings' && <MeetingLibrary key={activeWorkspace.id} meetings={meetings || []}
+            loading={meetingsLoading} error={meetingsError?.message} onRetry={() => void mutateMeetings()}
+            manager={canManageWorkspace} actorId={authSession?.user.id} onDelete={handleDeleteMeeting}
+            onOpen={id => { setSelectedMeetingId(id); setActiveTab('meeting'); setMeetingSubTab('summary'); setCurrentTime(0); }}
+            onUpload={() => beginAction(() => setUploadModalOpen(true))} onJoin={() => beginAction(() => setLiveMeetModalOpen(true))} />}
 
           {/* TAB 2: MEETING INTELLIGENCE DETAIL */}
           {activeTab === 'meeting' && (
             <div className="space-y-6 animate-fadeIn">
+              <button className="mp-text-button" onClick={() => setActiveTab('meetings')}><ArrowLeft size={15} />All meetings</button>
+              {meetingLoading && <div className="mp-empty" role="status">Loading meeting...</div>}
+              {meetingError && <div className="mp-error-state" role="alert"><p>{meetingError.message || 'Could not load meeting.'}</p><button className="mp-button mp-button-secondary" onClick={() => void mutateMeetingDetail()}>Try again</button></div>}
               {/* Empty state if no meetings exist */}
               {(!meetings || meetings.length === 0) && (
-                <div className="p-12 rounded-2xl bg-[#111113] border border-dashed border-[#27272A] text-center space-y-4 shadow-xl">
-                  <FileText className="w-12 h-12 text-[#8B5CF6] mx-auto animate-bounce" />
-                  <h3 className="text-lg font-bold text-white">No Meetings in this Workspace</h3>
-                  <p className="text-xs text-slate-400 max-w-md mx-auto">
+                <div className="p-12 rounded-xl bg-surface border border-dashed border-line text-center space-y-4 shadow-sm">
+                  <FileText className="w-12 h-12 text-brand mx-auto " />
+                  <h3 className="text-lg font-bold text-ink">No Meetings in this Workspace</h3>
+                  <p className="text-sm text-muted max-w-md mx-auto">
                     Upload an MP3, WAV, or M4A recording to create a timestamped transcript, summary, tasks, and decisions. Review the results when processing finishes.
                   </p>
                   <div className="flex items-center justify-center gap-3">
                     <button
-                      onClick={() => setUploadModalOpen(true)}
-                      className="px-5 py-2.5 rounded-xl bg-[#8B5CF6] hover:bg-[#7c3aed] text-white text-xs font-bold shadow-lg shadow-[#8B5CF6]/20 inline-flex items-center gap-2 cursor-pointer"
+                      onClick={() => beginAction(() => setUploadModalOpen(true))}
+                      className="px-5 py-2.5 rounded-xl bg-brand hover:bg-brand text-on-brand text-sm font-bold shadow-sm  inline-flex items-center gap-2 cursor-pointer"
                     >
                       <Upload className="w-4 h-4" />
                       <span>Upload Audio</span>
                     </button>
                     <button
-                      onClick={() => setLiveMeetModalOpen(true)}
-                      className="px-5 py-2.5 rounded-xl bg-[#18181b] hover:bg-[#27272A] text-slate-300 text-xs font-bold border border-[#27272A] inline-flex items-center gap-2 cursor-pointer"
+                      onClick={() => beginAction(() => setLiveMeetModalOpen(true))}
+                      className="px-5 py-2.5 rounded-xl bg-surface hover:bg-line text-ink text-sm font-bold border border-line inline-flex items-center gap-2 cursor-pointer"
                     >
                       <Video className="w-4 h-4" />
                       <span>Live meeting options</span>
@@ -1865,20 +1384,20 @@ export const AppWorkspace: React.FC<AppWorkspaceProps> = ({ onBackToLanding }) =
               {meetingDetail && (
                 <MeetingScriptContext.Provider value={meetingDetail.display_script || 'original'}>
                   {/* Meeting Header */}
-                  <MeetingHeader
+                  <MeetingHeader key={meetingDetail.id}
                     canManage={canManageMeeting}
                     meeting={meetingDetail}
                     allMeetings={meetings || []}
                     speakerStats={speakerStats}
-                    onSelectMeeting={(id) => setSelectedMeetingId(id)}
+                    onSelectMeeting={id => { setSelectedMeetingId(id); setCurrentTime(0); }}
                     onRenameMeeting={handleRenameMeeting}
                     onDeleteMeeting={handleDeleteMeeting}
-                    onExportMarkdown={handleExportMarkdown}
-                    onExportJSON={handleExportJSON}
-                    onExportPDF={handleExportPDF}
+                    onExportMarkdown={() => beginAction(handleExportMarkdown)}
+                    onExportJSON={() => beginAction(handleExportJSON)}
+                    onExportPDF={() => beginAction(handleExportPDF)}
                   />
 
-                  <div className="flex flex-wrap items-center gap-3 rounded-xl border border-[#27272A] bg-[#111113] p-3 text-xs text-slate-300">
+                  <div className="flex flex-wrap items-center gap-3 rounded-xl border border-line bg-surface p-3 text-sm text-ink">
                     <span>Meeting language: {MEETING_LANGUAGES.find(([code]) => code === (meetingDetail.transcription_language || meetingDetail.language_code))?.[1] || meetingDetail.language_name || 'Auto-detect'}</span>
                     {['hi', 'bn', 'auto'].includes(meetingDetail.transcription_language || meetingDetail.language_code || '') && (
                       <label className="flex items-center gap-2">Display
@@ -1891,13 +1410,13 @@ export const AppWorkspace: React.FC<AppWorkspaceProps> = ({ onBackToLanding }) =
                               await mutateMeetingDetail();
                             } catch (err) { showToast(err instanceof Error ? err.message : 'Could not change display', 'error'); }
                             finally { setSavingDisplayScript(false); }
-                          }} className="rounded-lg border border-[#3f3f46] bg-[#18181b] p-2 text-white">
+                          }} className="rounded-lg border border-line bg-surface p-2 text-ink">
                           <option value="original">Original script</option>
                           <option value="romanized">{(meetingDetail.transcription_language || meetingDetail.language_code) === 'hi' ? 'Hinglish' : (meetingDetail.transcription_language || meetingDetail.language_code) === 'bn' ? 'Benglish' : 'Roman letters (Hindi / Bengali)'}</option>
                         </select>
                       </label>
                     )}
-                    {meetingDetail.display_script === 'romanized' && <span className="text-slate-500">Roman spellings are approximate. Original quotes are preserved.</span>}
+                    {meetingDetail.display_script === 'romanized' && <span className="text-muted">Roman spellings are approximate. Original quotes are preserved.</span>}
                   </div>
 
                   {meetingDetail.status === 'in_progress' && (
@@ -1926,22 +1445,22 @@ export const AppWorkspace: React.FC<AppWorkspaceProps> = ({ onBackToLanding }) =
                     getToken={getToken} position={Math.max(0, ...(meetingTranscript || []).map(s => s.end_time))}
                     hasTranscript={!!meetingTranscript?.length} isLive onSeek={handleSeekToTime} />}
                   {meetingDetail.status === 'in_progress' && (
-                    <div className="p-6 rounded-2xl bg-[#111113] border border-rose-500/40 space-y-6 shadow-2xl shadow-rose-950/20">
-                      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 p-4 rounded-xl bg-gradient-to-r from-rose-950/40 via-[#18181b] to-slate-900 border border-rose-500/30">
+                    <div className="p-6 rounded-xl bg-surface border border-rose-500/40 space-y-6 shadow-sm ">
+                      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 p-4 rounded-xl bg-brand-soft border border-rose-500/30">
                         <div className="flex items-center gap-3">
-                          <div className="relative flex items-center justify-center w-10 h-10 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-400">
+                          <div className="relative flex items-center justify-center w-10 h-10 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-700">
                             <Radio className="w-5 h-5 animate-pulse" />
-                            <span className="absolute -top-1 -right-1 w-3 h-3 bg-rose-500 rounded-full border-2 border-[#111113] animate-ping" />
+                            <span className="absolute -top-1 -right-1 w-3 h-3 bg-rose-500 rounded-full border-2 border-[#111113] " />
                           </div>
                           <div>
                             <div className="flex items-center gap-2">
-                              <h3 className="text-base font-bold text-white">Live Google Meet Capture Active</h3>
-                              <span className="px-2 py-0.5 text-[10px] font-mono font-bold uppercase tracking-wider text-rose-300 bg-rose-950/80 border border-rose-500/40 rounded-md animate-pulse">
-                                Live Ingestion
+                              <h3 className="text-base font-bold text-ink">Live meeting</h3>
+                              <span className="px-2 py-0.5 text-sm font-mono font-bold uppercase tracking-wider text-rose-700 bg-rose-50 border border-rose-500/40 rounded-md animate-pulse">
+                                Live transcript
                               </span>
                             </div>
-                            <p className="text-xs text-slate-400 mt-0.5">
-                              Native bot is joining or connected ({meetingDetail.native_meeting_id || 'call'}). Speech turns stream into MeetPilot memory after capture begins.
+                            <p className="text-sm text-muted mt-0.5">
+                              Meeting assistant is joining or connected ({meetingDetail.native_meeting_id || 'call'}). Speech turns stream into MeetPilot memory after capture begins.
                             </p>
                           </div>
                         </div>
@@ -1949,17 +1468,17 @@ export const AppWorkspace: React.FC<AppWorkspaceProps> = ({ onBackToLanding }) =
                         <button
                           onClick={() => handleStopLiveMeeting(meetingDetail.id)}
                           disabled={stoppingLiveMeeting || !canManageMeeting}
-                          className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-rose-600 via-rose-500 to-pink-600 hover:from-rose-500 hover:to-pink-500 text-white text-xs font-bold shadow-lg shadow-rose-500/25 flex items-center gap-2 cursor-pointer transition-all active:scale-95 shrink-0"
+                          className="px-5 py-2.5 rounded-xl bg-brand-soft text-ink text-sm font-bold shadow-sm  flex items-center gap-2 cursor-pointer transition-all active:scale-95 shrink-0"
                         >
                           {stoppingLiveMeeting ? (
                             <>
                               <Loader2 className="w-4 h-4 animate-spin" />
-                              <span>Stopping & Triggering AI...</span>
+                              <span>Finishing meeting...</span>
                             </>
                           ) : (
                             <>
                               <Square className="w-4 h-4 fill-current" />
-                              <span>Leave / Process Meeting</span>
+                              <span>End capture</span>
                             </>
                           )}
                         </button>
@@ -1988,7 +1507,7 @@ export const AppWorkspace: React.FC<AppWorkspaceProps> = ({ onBackToLanding }) =
 
                   {/* Failed Meeting Error Card */}
                   {meetingDetail.status === 'failed' && (
-                    <MeetingErrorCard
+                    <MeetingErrorCard canManage={canManageMeeting}
                       meetingId={meetingDetail.id}
                       meetingTitle={meetingDetail.title}
                       failureReason={meetingDetail.failure_reason}
@@ -1997,19 +1516,19 @@ export const AppWorkspace: React.FC<AppWorkspaceProps> = ({ onBackToLanding }) =
                         const code = meetingDetail.native_meeting_id;
                         setRetryLiveMeetingUrl(code && /^[a-z]{3}-[a-z]{4}-[a-z]{3}$/i.test(code)
                           ? `https://meet.google.com/${code}` : '');
-                        setLiveMeetModalOpen(true);
+                        beginAction(() => setLiveMeetModalOpen(true));
                       }}
                       onRetry={handleRetryMeeting}
-                      onOpenUpload={() => setUploadModalOpen(true)}
+                      onOpenUpload={() => beginAction(() => setUploadModalOpen(true))}
                       onDelete={() => handleDeleteMeeting(meetingDetail.id, meetingDetail.title)}
                     />
                   )}
 
                   {meetingDetail.capture_failure_reason && meetingDetail.status !== 'failed' && (
-                    <div role="alert" className="rounded-xl border border-rose-500/30 bg-rose-950/20 p-4 text-sm text-rose-300">
+                    <div role="alert" className="rounded-xl border border-rose-500/30 bg-rose-50 p-4 text-sm text-rose-700">
                       <p className="font-semibold">Meeting capture was interrupted</p>
                       <p className="mt-1">The saved transcript and available analysis are shown below. Speech after the disconnection may be missing.</p>
-                      <details className="mt-2 text-xs"><summary className="cursor-pointer">Connection details</summary>{meetingDetail.capture_failure_reason}</details>
+                      <details className="mt-2 text-sm"><summary className="cursor-pointer">Connection details</summary>{meetingDetail.capture_failure_reason}</details>
                     </div>
                   )}
 
@@ -2018,7 +1537,7 @@ export const AppWorkspace: React.FC<AppWorkspaceProps> = ({ onBackToLanding }) =
                     <div className="space-y-6">
                       {/* Interactive Audio Player */}
                       {selectedMeetingId && meetingDetail.audio_url && (
-                        <MeetingAudioPlayer
+                        <MeetingAudioPlayer key={selectedMeetingId}
                           audioUrl={getAudioStreamUrl(selectedMeetingId)}
                           segments={meetingTranscript || []}
                           getToken={getToken}
@@ -2031,37 +1550,37 @@ export const AppWorkspace: React.FC<AppWorkspaceProps> = ({ onBackToLanding }) =
                       )}
 
                       {/* Sub-Tab Navigation Strip */}
-                      <div className="flex items-center gap-2 p-1.5 rounded-2xl bg-[#111113] border border-[#27272A] overflow-x-auto">
+                      <div className="flex items-center gap-2 p-1.5 rounded-xl bg-surface border border-line overflow-x-auto">
                         <button
                           onClick={() => setMeetingSubTab('summary')}
-                          className={`px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-2 ${
+                          className={`px-4 py-2 rounded-xl text-sm font-bold transition-all cursor-pointer flex items-center gap-2 ${
                             meetingSubTab === 'summary'
-                              ? 'bg-[#8B5CF6] text-white shadow-lg shadow-[#8B5CF6]/25'
-                              : 'text-slate-400 hover:text-white hover:bg-[#18181b]'
+                              ? 'bg-brand text-on-brand shadow-sm '
+                              : 'text-muted hover:text-ink hover:bg-surface'
                           }`}
                         >
                           <Sparkles className="w-3.5 h-3.5" />
-                          <span>Executive Summary & Decisions</span>
+                          <span>Summary & decisions</span>
                         </button>
 
                         <button
                           onClick={() => setMeetingSubTab('transcript')}
-                          className={`px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-2 ${
+                          className={`px-4 py-2 rounded-xl text-sm font-bold transition-all cursor-pointer flex items-center gap-2 ${
                             meetingSubTab === 'transcript'
-                              ? 'bg-[#8B5CF6] text-white shadow-lg shadow-[#8B5CF6]/25'
-                              : 'text-slate-400 hover:text-white hover:bg-[#18181b]'
+                              ? 'bg-brand text-on-brand shadow-sm '
+                              : 'text-muted hover:text-ink hover:bg-surface'
                           }`}
                         >
                           <FileText className="w-3.5 h-3.5" />
-                          <span>Diarized Transcript ({meetingTranscript?.length || 0})</span>
+                          <span>Transcript ({meetingTranscript?.length || 0})</span>
                         </button>
 
                         <button
                           onClick={() => setMeetingSubTab('tasks')}
-                          className={`px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-2 ${
+                          className={`px-4 py-2 rounded-xl text-sm font-bold transition-all cursor-pointer flex items-center gap-2 ${
                             meetingSubTab === 'tasks'
-                              ? 'bg-[#8B5CF6] text-white shadow-lg shadow-[#8B5CF6]/25'
-                              : 'text-slate-400 hover:text-white hover:bg-[#18181b]'
+                              ? 'bg-brand text-on-brand shadow-sm '
+                              : 'text-muted hover:text-ink hover:bg-surface'
                           }`}
                         >
                           <CheckCircle2 className="w-3.5 h-3.5" />
@@ -2070,17 +1589,17 @@ export const AppWorkspace: React.FC<AppWorkspaceProps> = ({ onBackToLanding }) =
 
                         <button
                           onClick={() => setMeetingSubTab('chat')}
-                          className={`px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-2 ${
+                          className={`px-4 py-2 rounded-xl text-sm font-bold transition-all cursor-pointer flex items-center gap-2 ${
                             meetingSubTab === 'chat'
-                              ? 'bg-[#8B5CF6] text-white shadow-lg shadow-[#8B5CF6]/25'
-                              : 'text-slate-400 hover:text-white hover:bg-[#18181b]'
+                              ? 'bg-brand text-on-brand shadow-sm '
+                              : 'text-muted hover:text-ink hover:bg-surface'
                           }`}
                         >
-                          <Bot className="w-3.5 h-3.5 text-indigo-300" />
-                          <span>AI Assistant Chat</span>
+                          <Bot className="w-3.5 h-3.5 text-brand" />
+                          <span>Ask this meeting</span>
                         </button>
                         {authSession?.user.id && <button onClick={() => setMeetingSubTab('review')}
-                          className={`px-4 py-2 rounded-xl text-xs font-bold ${meetingSubTab === 'review' ? 'bg-violet-600 text-white' : 'text-slate-400 hover:text-white'}`}>Review tools</button>}
+                          className={`px-4 py-2 rounded-xl text-sm font-bold ${meetingSubTab === 'review' ? 'bg-brand text-on-brand' : 'text-muted hover:text-ink'}`}>Review tools</button>}
                       </div>
 
                       {meetingSubTab === 'review' && authSession?.user.id && <MeetingReviewTools key={`${meetingDetail.id}:${authSession.user.id}`}
@@ -2125,7 +1644,7 @@ export const AppWorkspace: React.FC<AppWorkspaceProps> = ({ onBackToLanding }) =
                         />
                       )}
 
-                      {/* Sub-Tab 4: AI Assistant Chat */}
+                      {/* Sub-Tab 4: Ask this meeting */}
                       {meetingSubTab === 'chat' && (
                         <MeetingAssistantChat
                           meetingTitle={meetingDetail.title}
@@ -2142,131 +1661,13 @@ export const AppWorkspace: React.FC<AppWorkspaceProps> = ({ onBackToLanding }) =
             </div>
           )}
 
-          {/* TAB 3: KANBAN BOARD */}
-          {activeTab === 'kanban' && (
-            <div className="space-y-6 animate-fadeIn">
-              <div className="flex items-center justify-between">
-                <div>
-                  <h2 className="text-2xl font-extrabold text-white">Action Items Kanban Board</h2>
-                  <p className="text-xs text-slate-400 mt-0.5">
-                    Tasks aggregated across workspace meetings with live status updates.
-                  </p>
-                </div>
-              </div>
+          {activeTab === 'kanban' && <WorkspaceTaskBoard key={activeWorkspace.id} tasks={workspaceTasks || []}
+            meetings={meetings || []} members={members || []} manager={canManageWorkspace} loading={tasksLoading}
+            error={tasksError?.message} onRetry={() => void mutateTasks()} onDelete={handleDeleteTask}
+            onStatus={handleTaskStatusChange} onOpenMeeting={id => { setSelectedMeetingId(id); setActiveTab('meeting'); setMeetingSubTab('tasks'); }}
+            onCreate={async draft => { if (!canManageWorkspace) return; await createTaskApi({ ...draft, workspace_id: activeWorkspace.id, status: 'todo' }, getToken); await Promise.all([mutateTasks(), mutateMeetings()]); showToast('Action item created.'); }} />}
 
-              {/* 3 Kanban Columns */}
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                {/* Column 1: TODO */}
-                <div className="p-4 rounded-2xl bg-[#111113] border border-[#27272A] space-y-3">
-                  <div className="flex items-center justify-between pb-2 border-b border-[#27272A]">
-                    <span className="text-xs font-bold text-slate-400 uppercase tracking-wider flex items-center gap-2">
-                      <span className="w-2 h-2 rounded-full bg-amber-400" /> Todo
-                    </span>
-                    <span className="text-xs font-mono text-slate-500">{tasksByStatus.todo.length}</span>
-                  </div>
-
-                  <div className="space-y-3 min-h-[200px]">
-                    {tasksByStatus.todo.map((t) => (
-                      <div key={t.id} className="p-4 rounded-xl bg-[#18181b] border border-[#27272A] space-y-3 shadow-lg">
-                        <div className="flex items-start justify-between gap-2">
-                          <div className="text-xs font-bold text-white">{t.title}</div>
-                          <button
-                            disabled={!canManageWorkspace}
-                            onClick={() => handleDeleteTask(t.id, t.title)}
-                            title="Delete Task"
-                            className="p-1 rounded text-slate-500 hover:text-rose-400 hover:bg-rose-500/10 transition-colors cursor-pointer"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
-                        </div>
-                        <div className="flex items-center justify-between text-[11px] text-slate-400 pt-2 border-t border-[#27272A]">
-                          <span>{t.assignee_name || 'Unassigned'}</span>
-                          <button
-                            onClick={() => handleTaskStatusChange(t, 'doing')}
-                            className="text-[10px] text-[#8B5CF6] hover:underline font-mono cursor-pointer"
-                          >
-                            Move to Doing →
-                          </button>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-
-                {/* Column 2: DOING */}
-                <div className="p-4 rounded-2xl bg-[#111113] border border-[#27272A] space-y-3">
-                  <div className="flex items-center justify-between pb-2 border-b border-[#27272A]">
-                    <span className="text-xs font-bold text-[#8B5CF6] uppercase tracking-wider flex items-center gap-2">
-                      <span className="w-2 h-2 rounded-full bg-[#8B5CF6] animate-pulse" /> Doing
-                    </span>
-                    <span className="text-xs font-mono text-slate-500">{tasksByStatus.doing.length}</span>
-                  </div>
-
-                  <div className="space-y-3 min-h-[200px]">
-                    {tasksByStatus.doing.map((t) => (
-                      <div key={t.id} className="p-4 rounded-xl bg-[#18181b] border border-[#8B5CF6]/50 space-y-3 shadow-lg">
-                        <div className="flex items-start justify-between gap-2">
-                          <div className="text-xs font-bold text-white">{t.title}</div>
-                          <button
-                            disabled={!canManageWorkspace}
-                            onClick={() => handleDeleteTask(t.id, t.title)}
-                            title="Delete Task"
-                            className="p-1 rounded text-slate-500 hover:text-rose-400 hover:bg-rose-500/10 transition-colors cursor-pointer"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
-                        </div>
-                        <div className="flex items-center justify-between text-[11px] text-slate-400 pt-2 border-t border-[#27272A]">
-                          <span>{t.assignee_name || 'Unassigned'}</span>
-                          <button
-                            onClick={() => handleTaskStatusChange(t, 'done')}
-                            className="text-[10px] text-emerald-400 hover:underline font-mono cursor-pointer"
-                          >
-                            Mark Done ✓
-                          </button>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-
-                {/* Column 3: DONE */}
-                <div className="p-4 rounded-2xl bg-[#111113] border border-[#27272A] space-y-3">
-                  <div className="flex items-center justify-between pb-2 border-b border-[#27272A]">
-                    <span className="text-xs font-bold text-emerald-400 uppercase tracking-wider flex items-center gap-2">
-                      <span className="w-2 h-2 rounded-full bg-emerald-400" /> Done
-                    </span>
-                    <span className="text-xs font-mono text-slate-500">{tasksByStatus.done.length}</span>
-                  </div>
-
-                  <div className="space-y-3 min-h-[200px]">
-                    {tasksByStatus.done.map((t) => (
-                      <div key={t.id} className="p-4 rounded-xl bg-[#18181b]/50 border border-[#27272A] space-y-2 opacity-80">
-                        <div className="flex items-start justify-between gap-2">
-                          <div className="text-xs font-bold text-slate-300 line-through">{t.title}</div>
-                          <button
-                            disabled={!canManageWorkspace}
-                            onClick={() => handleDeleteTask(t.id, t.title)}
-                            title="Delete Task"
-                            className="p-1 rounded text-slate-500 hover:text-rose-400 hover:bg-rose-500/10 transition-colors cursor-pointer"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
-                        </div>
-                        <div className="flex items-center justify-between text-[11px] text-slate-500 pt-2 border-t border-[#27272A]">
-                          <span>{t.assignee_name || 'Unassigned'}</span>
-                          <span className="text-emerald-400 font-mono text-[10px]">Completed</span>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-
-              </div>
-            </div>
-          )}
-
-          {/* TAB: 🧠 AI KNOWLEDGE / RAG */}
+          {/* TAB: AI KNOWLEDGE / RAG */}
           {activeTab === 'knowledge' && (
             <div className="h-full flex-1 flex flex-col min-h-0 animate-fadeIn">
               <AIKnowledgeView
@@ -2276,17 +1677,15 @@ export const AppWorkspace: React.FC<AppWorkspaceProps> = ({ onBackToLanding }) =
                 onNavigateToMeeting={(meetingId, ts) => {
                   setSelectedMeetingId(meetingId);
                   setActiveTab('meeting');
-                  if (ts !== undefined) {
-                    setMeetingSubTab('transcript');
-                    handleSeekToTime(ts);
-                  }
+                  setCurrentTime(ts || 0);
+                  setMeetingSubTab(ts !== undefined ? 'transcript' : 'summary');
                 }}
                 showToast={showToast}
               />
             </div>
           )}
 
-          {/* TAB: 🔎 WORKSPACE SEMANTIC SEARCH */}
+          {/* TAB: WORKSPACE SEMANTIC SEARCH */}
           {activeTab === 'search' && (
             <div className="h-full flex-1 flex flex-col min-h-0 animate-fadeIn">
               <WorkspaceSemanticSearch
@@ -2295,12 +1694,10 @@ export const AppWorkspace: React.FC<AppWorkspaceProps> = ({ onBackToLanding }) =
                 onNavigateToMeeting={(meetingId, ts) => {
                   setSelectedMeetingId(meetingId);
                   setActiveTab('meeting');
-                  if (ts !== undefined) {
-                    setMeetingSubTab('transcript');
-                    handleSeekToTime(ts);
-                  }
+                  setCurrentTime(ts || 0);
+                  setMeetingSubTab(ts !== undefined ? 'transcript' : 'summary');
                 }}
-                onNavigateToTab={(tab) => setActiveTab(tab as any)}
+                onNavigateToTab={tab => { if (tab === 'kanban') setActiveTab('kanban'); }}
                 showToast={showToast}
               />
             </div>
@@ -2310,48 +1707,48 @@ export const AppWorkspace: React.FC<AppWorkspaceProps> = ({ onBackToLanding }) =
           {activeTab === 'analytics' && (
             <div className="space-y-6 animate-fadeIn">
               <div>
-                <h2 className="text-2xl font-extrabold text-white">Workspace Analytics</h2>
-                <p className="text-xs text-slate-400 mt-0.5">Real-time metrics computed directly from PostgreSQL meeting intelligence and diarized audio turns.</p>
+                <h2 className="text-2xl font-semibold text-ink">Workspace Analytics</h2>
+                <p className="text-sm text-muted mt-0.5">A workspace view of meeting duration, decisions and action-item progress.</p>
               </div>
 
               {/* 4-Card Executive Metric Strip */}
               <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-                <div className="p-4 rounded-xl bg-[#111113] border border-[#27272A] space-y-1">
-                  <div className="text-[11px] font-mono uppercase text-slate-400">Total Meetings</div>
-                  <div className="text-2xl font-extrabold text-white font-mono">
+                <div className="p-4 rounded-xl bg-surface border border-line space-y-1">
+                  <div className="text-sm font-mono uppercase text-muted">Total Meetings</div>
+                  <div className="text-2xl font-semibold text-ink font-mono">
                     {workspaceAnalytics?.total_meetings ?? meetings?.length ?? 0}
                   </div>
-                  <div className="text-[10px] text-emerald-400 font-mono">
-                    {workspaceAnalytics?.completed_meetings ?? 0} completed • {workspaceAnalytics?.processing_meetings ?? 0} in pipeline
+                  <div className="text-sm text-emerald-700 font-mono">
+                    {workspaceAnalytics?.completed_meetings ?? 0} completed &bull; {workspaceAnalytics?.processing_meetings ?? 0} in pipeline
                   </div>
                 </div>
 
-                <div className="p-4 rounded-xl bg-[#111113] border border-[#27272A] space-y-1">
-                  <div className="text-[11px] font-mono uppercase text-slate-400">Speaking Time</div>
-                  <div className="text-2xl font-extrabold text-[#8B5CF6] font-mono">
+                <div className="p-4 rounded-xl bg-surface border border-line space-y-1">
+                  <div className="text-sm font-mono uppercase text-muted">Meeting duration</div>
+                  <div className="text-2xl font-semibold text-brand font-mono">
                     {workspaceAnalytics?.total_speaking_hours ?? 0} hrs
                   </div>
-                  <div className="text-[10px] text-slate-400 font-mono">
+                  <div className="text-sm text-muted font-mono">
                     Avg {workspaceAnalytics?.avg_meeting_duration_minutes ?? 0}m per meeting
                   </div>
                 </div>
 
-                <div className="p-4 rounded-xl bg-[#111113] border border-[#27272A] space-y-1">
-                  <div className="text-[11px] font-mono uppercase text-slate-400">Decisions Reached</div>
-                  <div className="text-2xl font-extrabold text-sky-400 font-mono">
+                <div className="p-4 rounded-xl bg-surface border border-line space-y-1">
+                  <div className="text-sm font-mono uppercase text-muted">Decisions Reached</div>
+                  <div className="text-2xl font-semibold text-sky-700 font-mono">
                     {workspaceAnalytics?.total_decisions ?? 0}
                   </div>
-                  <div className="text-[10px] text-slate-400 font-mono">
+                  <div className="text-sm text-muted font-mono">
                     Consensus points recorded
                   </div>
                 </div>
 
-                <div className="p-4 rounded-xl bg-[#111113] border border-[#27272A] space-y-1">
-                  <div className="text-[11px] font-mono uppercase text-slate-400">Task Completion</div>
-                  <div className="text-2xl font-extrabold text-emerald-400 font-mono">
+                <div className="p-4 rounded-xl bg-surface border border-line space-y-1">
+                  <div className="text-sm font-mono uppercase text-muted">Task Completion</div>
+                  <div className="text-2xl font-semibold text-emerald-700 font-mono">
                     {workspaceAnalytics?.task_completion_rate ?? 0}%
                   </div>
-                  <div className="text-[10px] text-slate-400 font-mono">
+                  <div className="text-sm text-muted font-mono">
                     {workspaceAnalytics?.completed_tasks ?? tasksByStatus.done.length} of {workspaceAnalytics?.total_tasks ?? workspaceTasks?.length ?? 0} items resolved
                   </div>
                 </div>
@@ -2359,26 +1756,26 @@ export const AppWorkspace: React.FC<AppWorkspaceProps> = ({ onBackToLanding }) =
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 {/* Speaking Time Distribution */}
-                <div className="p-6 rounded-2xl bg-[#111113] border border-[#27272A] space-y-4">
+                <div className="p-6 rounded-xl bg-surface border border-line space-y-4">
                   <div className="flex items-center justify-between">
-                    <h3 className="text-sm font-bold text-white uppercase tracking-wider">
+                    <h3 className="text-sm font-bold text-ink uppercase tracking-wider">
                       Speaker Airtime Distribution
                     </h3>
-                    <span className="text-[10px] font-mono text-slate-500">Workspace Aggregate</span>
+                    <span className="text-sm font-mono text-muted">Workspace Aggregate</span>
                   </div>
 
                   {workspaceAnalytics?.speakers_distribution && workspaceAnalytics.speakers_distribution.length > 0 ? (
                     <div className="space-y-3 pt-2">
                       {workspaceAnalytics.speakers_distribution.map((stat, idx) => (
                         <div key={idx} className="space-y-1">
-                          <div className="flex justify-between text-xs">
-                            <span className="text-slate-300 font-semibold">{stat.speaker}</span>
-                            <span className="text-[#8B5CF6] font-mono font-bold">
-                              {stat.percentage}% ({Math.round(stat.duration_seconds / 60)} min • {stat.turn_count} turns)
+                          <div className="flex justify-between text-sm">
+                            <span className="text-ink font-semibold">{stat.speaker}</span>
+                            <span className="text-brand font-mono font-bold">
+                              {stat.percentage}% ({Math.round(stat.duration_seconds / 60)} min &bull; {stat.turn_count} turns)
                             </span>
                           </div>
-                          <div className="w-full h-2 rounded-full bg-[#18181b] overflow-hidden">
-                            <div className="h-full bg-[#8B5CF6]" style={{ width: `${stat.percentage}%` }} />
+                          <div className="w-full h-2 rounded-full bg-surface overflow-hidden">
+                            <div className="h-full bg-brand" style={{ width: `${stat.percentage}%` }} />
                           </div>
                         </div>
                       ))}
@@ -2387,54 +1784,54 @@ export const AppWorkspace: React.FC<AppWorkspaceProps> = ({ onBackToLanding }) =
                     <div className="space-y-3 pt-2">
                       {analyticsSpeakerStats.map((stat, idx) => (
                         <div key={idx} className="space-y-1">
-                          <div className="flex justify-between text-xs">
-                            <span className="text-slate-300 font-semibold">{stat.speaker}</span>
-                            <span className="text-[#8B5CF6] font-mono font-bold">
+                          <div className="flex justify-between text-sm">
+                            <span className="text-ink font-semibold">{stat.speaker}</span>
+                            <span className="text-brand font-mono font-bold">
                               {stat.percentage}% ({stat.hours} hrs)
                             </span>
                           </div>
-                          <div className="w-full h-2 rounded-full bg-[#18181b] overflow-hidden">
-                            <div className="h-full bg-[#8B5CF6]" style={{ width: `${stat.percentage}%` }} />
+                          <div className="w-full h-2 rounded-full bg-surface overflow-hidden">
+                            <div className="h-full bg-brand" style={{ width: `${stat.percentage}%` }} />
                           </div>
                         </div>
                       ))}
                     </div>
                   ) : (
-                    <p className="text-xs text-slate-500 italic">No diarized audio segments recorded in this workspace yet.</p>
+                    <p className="text-sm text-muted italic">No diarized audio segments recorded in this workspace yet.</p>
                   )}
                 </div>
 
                 {/* Action Item Breakdown */}
-                <div className="p-6 rounded-2xl bg-[#111113] border border-[#27272A] space-y-4">
-                  <h3 className="text-sm font-bold text-white uppercase tracking-wider">Action Items & Kanban State</h3>
+                <div className="p-6 rounded-xl bg-surface border border-line space-y-4">
+                  <h3 className="text-sm font-bold text-ink uppercase tracking-wider">Action Items & Kanban State</h3>
                   <div className="space-y-3 pt-2">
-                    <div className="flex items-center justify-between text-xs p-3 rounded-xl bg-[#18181b] border border-[#27272A]">
-                      <span className="text-slate-300">Total Action Items</span>
-                      <span className="font-mono font-bold text-white">{workspaceAnalytics?.total_tasks ?? workspaceTasks?.length ?? 0}</span>
+                    <div className="flex items-center justify-between text-sm p-3 rounded-xl bg-surface border border-line">
+                      <span className="text-ink">Total Action Items</span>
+                      <span className="font-mono font-bold text-ink">{workspaceAnalytics?.total_tasks ?? workspaceTasks?.length ?? 0}</span>
                     </div>
 
-                    <div className="flex items-center justify-between text-xs p-3 rounded-xl bg-[#18181b] border border-[#27272A]">
+                    <div className="flex items-center justify-between text-sm p-3 rounded-xl bg-surface border border-line">
                       <div className="flex items-center gap-2">
                         <span className="w-2 h-2 rounded-full bg-emerald-400" />
-                        <span className="text-slate-300">Completed (Done)</span>
+                        <span className="text-ink">Completed (Done)</span>
                       </div>
-                      <span className="font-mono font-bold text-emerald-400">{workspaceAnalytics?.completed_tasks ?? tasksByStatus.done.length}</span>
+                      <span className="font-mono font-bold text-emerald-700">{workspaceAnalytics?.completed_tasks ?? tasksByStatus.done.length}</span>
                     </div>
 
-                    <div className="flex items-center justify-between text-xs p-3 rounded-xl bg-[#18181b] border border-[#27272A]">
+                    <div className="flex items-center justify-between text-sm p-3 rounded-xl bg-surface border border-line">
                       <div className="flex items-center gap-2">
-                        <span className="w-2 h-2 rounded-full bg-[#8B5CF6]" />
-                        <span className="text-slate-300">In Progress (Doing)</span>
+                        <span className="w-2 h-2 rounded-full bg-brand" />
+                        <span className="text-ink">In Progress (Doing)</span>
                       </div>
-                      <span className="font-mono font-bold text-[#8B5CF6]">{workspaceAnalytics?.in_progress_tasks ?? tasksByStatus.doing.length}</span>
+                      <span className="font-mono font-bold text-brand">{workspaceAnalytics?.in_progress_tasks ?? tasksByStatus.doing.length}</span>
                     </div>
 
-                    <div className="flex items-center justify-between text-xs p-3 rounded-xl bg-[#18181b] border border-[#27272A]">
+                    <div className="flex items-center justify-between text-sm p-3 rounded-xl bg-surface border border-line">
                       <div className="flex items-center gap-2">
                         <span className="w-2 h-2 rounded-full bg-amber-400" />
-                        <span className="text-slate-300">To Do</span>
+                        <span className="text-ink">To Do</span>
                       </div>
-                      <span className="font-mono font-bold text-amber-400">{workspaceAnalytics?.todo_tasks ?? tasksByStatus.todo.length}</span>
+                      <span className="font-mono font-bold text-amber-700">{workspaceAnalytics?.todo_tasks ?? tasksByStatus.todo.length}</span>
                     </div>
                   </div>
                 </div>
@@ -2448,20 +1845,20 @@ export const AppWorkspace: React.FC<AppWorkspaceProps> = ({ onBackToLanding }) =
               {activeWorkspace && <WorkspaceAccessPanel key={activeWorkspace.id} workspace={activeWorkspace} members={members || []} getToken={getToken} onChange={async () => { await Promise.all([mutateMembers(), mutateWorkspaces()]); }} />}
               <div className="flex items-center justify-between">
                 <div>
-                  <h2 className="text-2xl font-extrabold text-white">{activeWorkspace?.name || 'Workspace'} Members</h2>
-                  <p className="text-xs text-slate-400 mt-0.5">Manage team access and permissions.</p>
+                  <h2 className="text-2xl font-semibold text-ink">{activeWorkspace?.name || 'Workspace'} Members</h2>
+                  <p className="text-sm text-muted mt-0.5">Manage team access and permissions.</p>
                 </div>
                 <button
                   disabled={!canManageWorkspace}
                   onClick={() => setInviteModalOpen(true)}
-                  className="px-4 py-2 rounded-xl bg-[#8B5CF6] hover:bg-[#7c3aed] text-white text-xs font-bold cursor-pointer shadow-lg shadow-[#8B5CF6]/20"
+                  className="px-4 py-2 rounded-xl bg-brand hover:bg-brand text-on-brand text-sm font-bold cursor-pointer shadow-sm "
                 >
                   + Invite Teammate
                 </button>
               </div>
 
-              <div className="p-6 rounded-2xl bg-[#111113] border border-[#27272A] space-y-4">
-                <h3 className="text-sm font-bold text-white uppercase tracking-wider">
+              <div className="p-6 rounded-xl bg-surface border border-line space-y-4">
+                <h3 className="text-sm font-bold text-ink uppercase tracking-wider">
                   Active Workspace Members ({members?.length || 1})
                 </h3>
 
@@ -2469,7 +1866,7 @@ export const AppWorkspace: React.FC<AppWorkspaceProps> = ({ onBackToLanding }) =
                   {members?.map((m) => (
                     <div
                       key={m.user_id}
-                      className="p-4 rounded-xl bg-[#18181b] border border-[#27272A] flex items-center justify-between"
+                      className="p-4 rounded-xl bg-surface border border-line flex items-center justify-between"
                     >
                       <div className="flex items-center gap-3">
                         <img
@@ -2478,19 +1875,19 @@ export const AppWorkspace: React.FC<AppWorkspaceProps> = ({ onBackToLanding }) =
                           className="w-9 h-9 rounded-full object-cover"
                         />
                         <div>
-                          <div className="text-xs font-bold text-white">{m.name}</div>
-                          <div className="text-[11px] text-slate-400">{m.email}</div>
+                          <div className="text-sm font-bold text-ink">{m.name}</div>
+                          <div className="text-sm text-muted">{m.email}</div>
                         </div>
                       </div>
                       <div className="flex items-center gap-3">
-                        <span className="text-[10px] font-mono px-2.5 py-1 rounded bg-[#8B5CF6]/20 text-[#8B5CF6] font-bold uppercase">
+                        <span className="text-sm font-mono px-2.5 py-1 rounded bg-brand/20 text-brand font-bold uppercase">
                           {m.role}
                         </span>
                         {canManageWorkspace && m.role !== 'owner' && (isWorkspaceOwner || m.role !== 'admin') && (
                           <button
                             onClick={() => handleRemoveMember(m.user_id, m.name)}
                             title="Remove member from workspace"
-                            className="p-1.5 rounded-lg text-slate-500 hover:text-rose-400 hover:bg-rose-950/20 transition-colors cursor-pointer"
+                            className="p-1.5 rounded-lg text-muted hover:text-rose-700 hover:bg-rose-50 transition-colors cursor-pointer"
                           >
                             <Trash2 className="w-3.5 h-3.5" />
                           </button>
@@ -2504,12 +1901,12 @@ export const AppWorkspace: React.FC<AppWorkspaceProps> = ({ onBackToLanding }) =
           )}
 
           {/* TAB 7: INTEGRATIONS */}
-          {activeTab === 'integrations' && !canManageWorkspace && <p className="text-xs text-slate-400">Workspace integrations are managed by your manager.</p>}
+          {activeTab === 'integrations' && !canManageWorkspace && <p className="text-sm text-muted">Workspace integrations are managed by your manager.</p>}
           {activeTab === 'integrations' && canManageWorkspace && (
             <div className="space-y-6 animate-fadeIn">
               <div>
-                <h2 className="text-2xl font-extrabold text-white">Workspace Integrations</h2>
-                <p className="text-xs text-slate-400 mt-0.5">Connect MeetPilot AI to issue trackers, Discord channels, Google Calendar, and Zoom cloud recordings.</p>
+                <h2 className="text-2xl font-semibold text-ink">Workspace Integrations</h2>
+                <p className="text-sm text-muted mt-0.5">Connect your calendar, import Zoom recordings or send meeting digests to Discord.</p>
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -2518,7 +1915,7 @@ export const AppWorkspace: React.FC<AppWorkspaceProps> = ({ onBackToLanding }) =
                   const discord = integrations?.find((i) => i.provider === 'discord');
                   const isConn = discord?.is_connected;
                   return (
-                    <div className="p-6 rounded-2xl bg-[#111113] border border-[#27272A] space-y-4 flex flex-col justify-between">
+                    <div className="p-6 rounded-xl bg-surface border border-line space-y-4 flex flex-col justify-between">
                       <div className="space-y-3">
                         <div className="flex items-center justify-between">
                           <div className="flex items-center gap-2.5">
@@ -2526,16 +1923,16 @@ export const AppWorkspace: React.FC<AppWorkspaceProps> = ({ onBackToLanding }) =
                               #
                             </div>
                             <div>
-                              <div className="text-sm font-extrabold text-white">Discord Webhook</div>
-                              <div className="text-[11px] font-mono text-slate-400">Digest Bot</div>
+                              <div className="text-sm font-semibold text-ink">Discord Webhook</div>
+                              <div className="text-sm font-mono text-muted">Digest Bot</div>
                             </div>
                           </div>
 
                           <span
-                            className={`px-2.5 py-0.5 rounded-full text-[10px] font-mono font-bold flex items-center gap-1.5 ${
+                            className={`px-2.5 py-0.5 rounded-full text-sm font-mono font-bold flex items-center gap-1.5 ${
                               isConn
-                                ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
-                                : 'bg-[#18181b] text-slate-400 border border-[#27272A]'
+                                ? 'bg-emerald-500/20 text-emerald-700 border border-emerald-500/30'
+                                : 'bg-surface text-muted border border-line'
                             }`}
                           >
                             <span className={`w-1.5 h-1.5 rounded-full ${isConn ? 'bg-emerald-400' : 'bg-slate-500'}`} />
@@ -2543,24 +1940,24 @@ export const AppWorkspace: React.FC<AppWorkspaceProps> = ({ onBackToLanding }) =
                           </span>
                         </div>
 
-                        <p className="text-xs text-slate-300 leading-relaxed">
+                        <p className="text-sm text-ink leading-relaxed">
                           Automatically broadcasts an executive digest (meeting overview, key takeaways, and top action items) to your team's Discord channel when a meeting completes.
                         </p>
 
                         {isConn && discord?.masked_identifier && (
-                          <div className="p-2.5 rounded-xl bg-[#18181b] border border-[#27272A] text-[11px] font-mono text-slate-400 truncate">
-                            Webhook: <span className="text-emerald-300">{discord.masked_identifier}</span>
+                          <div className="p-2.5 rounded-xl bg-surface border border-line text-sm font-mono text-muted truncate">
+                            Webhook: <span className="text-emerald-700">{discord.masked_identifier}</span>
                           </div>
                         )}
                       </div>
 
-                      <div className="flex items-center gap-2 pt-2 border-t border-[#27272A]">
+                      <div className="flex items-center gap-2 pt-2 border-t border-line">
                         <button
                           onClick={() => {
                             setDiscordWebhookInput('');
                             setDiscordModalOpen(true);
                           }}
-                          className="px-4 py-2 rounded-xl text-xs font-bold bg-[#8B5CF6] hover:bg-[#7c3aed] text-white transition-colors cursor-pointer shadow-lg shadow-[#8B5CF6]/20"
+                          className="px-4 py-2 rounded-xl text-sm font-bold bg-brand hover:bg-brand text-on-brand transition-colors cursor-pointer shadow-sm "
                         >
                           {isConn ? 'Update Webhook' : 'Configure Discord'}
                         </button>
@@ -2568,7 +1965,7 @@ export const AppWorkspace: React.FC<AppWorkspaceProps> = ({ onBackToLanding }) =
                         {isConn && (
                           <button
                             onClick={() => handleDisconnectIntegration('discord', 'Discord Webhook')}
-                            className="px-3.5 py-2 rounded-xl text-xs font-bold text-rose-400 hover:text-rose-300 hover:bg-rose-950/20 border border-rose-500/30 transition-colors cursor-pointer"
+                            className="px-3.5 py-2 rounded-xl text-sm font-bold text-rose-700 hover:text-rose-700 hover:bg-rose-50 border border-rose-500/30 transition-colors cursor-pointer"
                           >
                             Disconnect
                           </button>
@@ -2583,24 +1980,24 @@ export const AppWorkspace: React.FC<AppWorkspaceProps> = ({ onBackToLanding }) =
                   const gcal = integrations?.find((i) => i.provider === 'google_calendar');
                   const isConn = gcal?.is_connected;
                   return (
-                    <div className="p-6 rounded-2xl bg-[#111113] border border-[#27272A] space-y-4 flex flex-col justify-between">
+                    <div className="p-6 rounded-xl bg-surface border border-line space-y-4 flex flex-col justify-between">
                       <div className="space-y-3">
                         <div className="flex items-center justify-between">
                           <div className="flex items-center gap-2.5">
-                            <div className="w-8 h-8 rounded-xl bg-blue-500/20 border border-blue-500/40 flex items-center justify-center text-blue-400 font-bold">
+                            <div className="w-8 h-8 rounded-xl bg-blue-500/20 border border-blue-500/40 flex items-center justify-center text-blue-700 font-bold">
                               <Calendar className="w-4 h-4" />
                             </div>
                             <div>
-                              <div className="text-sm font-extrabold text-white">Google Calendar</div>
-                              <div className="text-[11px] font-mono text-slate-400">Event Sync</div>
+                              <div className="text-sm font-semibold text-ink">Google Calendar</div>
+                              <div className="text-sm font-mono text-muted">Event Sync</div>
                             </div>
                           </div>
 
                           <span
-                            className={`px-2.5 py-0.5 rounded-full text-[10px] font-mono font-bold flex items-center gap-1.5 ${
+                            className={`px-2.5 py-0.5 rounded-full text-sm font-mono font-bold flex items-center gap-1.5 ${
                               isConn
-                                ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
-                                : 'bg-[#18181b] text-slate-400 border border-[#27272A]'
+                                ? 'bg-emerald-500/20 text-emerald-700 border border-emerald-500/30'
+                                : 'bg-surface text-muted border border-line'
                             }`}
                           >
                             <span className={`w-1.5 h-1.5 rounded-full ${isConn ? 'bg-emerald-400' : 'bg-slate-500'}`} />
@@ -2608,21 +2005,21 @@ export const AppWorkspace: React.FC<AppWorkspaceProps> = ({ onBackToLanding }) =
                           </span>
                         </div>
 
-                        <p className="text-xs text-slate-300 leading-relaxed">
+                        <p className="text-sm text-ink leading-relaxed">
                           Automatically synchronizes detected action items with assigned due dates into Google Calendar events with direct links to the meeting audio timestamp.
                         </p>
 
                         {isConn && gcal?.masked_identifier && (
-                          <div className="p-2.5 rounded-xl bg-[#18181b] border border-[#27272A] text-[11px] font-mono text-slate-400 truncate">
-                            Account: <span className="text-blue-300">{gcal.masked_identifier}</span>
+                          <div className="p-2.5 rounded-xl bg-surface border border-line text-sm font-mono text-muted truncate">
+                            Account: <span className="text-blue-700">{gcal.masked_identifier}</span>
                           </div>
                         )}
                       </div>
 
-                      <div className="flex items-center gap-2 pt-2 border-t border-[#27272A]">
+                      <div className="flex items-center gap-2 pt-2 border-t border-line">
                         <button
                           onClick={handleConnectGoogleCalendar}
-                          className="px-4 py-2 rounded-xl text-xs font-bold bg-[#8B5CF6] hover:bg-[#7c3aed] text-white transition-colors cursor-pointer shadow-lg shadow-[#8B5CF6]/20"
+                          className="px-4 py-2 rounded-xl text-sm font-bold bg-brand hover:bg-brand text-on-brand transition-colors cursor-pointer shadow-sm "
                         >
                           {isConn ? 'Reconnect Calendar' : 'Connect Google Calendar'}
                         </button>
@@ -2630,7 +2027,7 @@ export const AppWorkspace: React.FC<AppWorkspaceProps> = ({ onBackToLanding }) =
                         {isConn && (
                           <button
                             onClick={() => handleDisconnectIntegration('google_calendar', 'Google Calendar')}
-                            className="px-3.5 py-2 rounded-xl text-xs font-bold text-rose-400 hover:text-rose-300 hover:bg-rose-950/20 border border-rose-500/30 transition-colors cursor-pointer"
+                            className="px-3.5 py-2 rounded-xl text-sm font-bold text-rose-700 hover:text-rose-700 hover:bg-rose-50 border border-rose-500/30 transition-colors cursor-pointer"
                           >
                             Disconnect
                           </button>
@@ -2645,24 +2042,24 @@ export const AppWorkspace: React.FC<AppWorkspaceProps> = ({ onBackToLanding }) =
                   const zoom = integrations?.find((i) => i.provider === 'zoom');
                   const isConn = zoom?.is_connected;
                   return (
-                    <div className="p-6 rounded-2xl bg-[#111113] border border-[#27272A] space-y-4 flex flex-col justify-between">
+                    <div className="p-6 rounded-xl bg-surface border border-line space-y-4 flex flex-col justify-between">
                       <div className="space-y-3">
                         <div className="flex items-center justify-between">
                           <div className="flex items-center gap-2.5">
-                            <div className="w-8 h-8 rounded-xl bg-sky-500/20 border border-sky-500/40 flex items-center justify-center text-sky-400 font-bold">
+                            <div className="w-8 h-8 rounded-xl bg-sky-500/20 border border-sky-500/40 flex items-center justify-center text-sky-700 font-bold">
                               <Radio className="w-4 h-4" />
                             </div>
                             <div>
-                              <div className="text-sm font-extrabold text-white">Zoom Cloud Recordings</div>
-                              <div className="text-[11px] font-mono text-slate-400">1-Click Importer</div>
+                              <div className="text-sm font-semibold text-ink">Zoom Cloud Recordings</div>
+                              <div className="text-sm font-mono text-muted">1-Click Importer</div>
                             </div>
                           </div>
 
                           <span
-                            className={`px-2.5 py-0.5 rounded-full text-[10px] font-mono font-bold flex items-center gap-1.5 ${
+                            className={`px-2.5 py-0.5 rounded-full text-sm font-mono font-bold flex items-center gap-1.5 ${
                               isConn
-                                ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
-                                : 'bg-[#18181b] text-slate-400 border border-[#27272A]'
+                                ? 'bg-emerald-500/20 text-emerald-700 border border-emerald-500/30'
+                                : 'bg-surface text-muted border border-line'
                             }`}
                           >
                             <span className={`w-1.5 h-1.5 rounded-full ${isConn ? 'bg-emerald-400' : 'bg-slate-500'}`} />
@@ -2670,29 +2067,29 @@ export const AppWorkspace: React.FC<AppWorkspaceProps> = ({ onBackToLanding }) =
                           </span>
                         </div>
 
-                        <p className="text-xs text-slate-300 leading-relaxed">
+                        <p className="text-sm text-ink leading-relaxed">
                           Fetch and browse Zoom cloud audio/video recordings. Import any recording directly into MeetPilot AI for speech diarization and summary extraction.
                         </p>
 
                         {isConn && zoom?.masked_identifier && (
-                          <div className="p-2.5 rounded-xl bg-[#18181b] border border-[#27272A] text-[11px] font-mono text-slate-400 truncate">
-                            Status: <span className="text-sky-300">{zoom.masked_identifier}</span>
+                          <div className="p-2.5 rounded-xl bg-surface border border-line text-sm font-mono text-muted truncate">
+                            Status: <span className="text-sky-700">{zoom.masked_identifier}</span>
                           </div>
                         )}
                       </div>
 
-                      <div className="flex items-center gap-2 pt-2 border-t border-[#27272A]">
+                      <div className="flex items-center gap-2 pt-2 border-t border-line">
                         {isConn ? (
                           <>
                             <button
                               onClick={handleOpenZoomPicker}
-                              className="px-4 py-2 rounded-xl text-xs font-bold bg-[#8B5CF6] hover:bg-[#7c3aed] text-white transition-colors cursor-pointer shadow-lg shadow-[#8B5CF6]/20"
+                              className="px-4 py-2 rounded-xl text-sm font-bold bg-brand hover:bg-brand text-on-brand transition-colors cursor-pointer shadow-sm "
                             >
                               Browse Recordings
                             </button>
                             <button
                               onClick={() => handleDisconnectIntegration('zoom', 'Zoom Account')}
-                              className="px-3.5 py-2 rounded-xl text-xs font-bold text-rose-400 hover:text-rose-300 hover:bg-rose-950/20 border border-rose-500/30 transition-colors cursor-pointer"
+                              className="px-3.5 py-2 rounded-xl text-sm font-bold text-rose-700 hover:text-rose-700 hover:bg-rose-50 border border-rose-500/30 transition-colors cursor-pointer"
                             >
                               Disconnect
                             </button>
@@ -2700,7 +2097,7 @@ export const AppWorkspace: React.FC<AppWorkspaceProps> = ({ onBackToLanding }) =
                         ) : (
                           <button
                             onClick={handleConnectZoom}
-                            className="px-4 py-2 rounded-xl text-xs font-bold bg-[#8B5CF6] hover:bg-[#7c3aed] text-white transition-colors cursor-pointer shadow-lg shadow-[#8B5CF6]/20"
+                            className="px-4 py-2 rounded-xl text-sm font-bold bg-brand hover:bg-brand text-on-brand transition-colors cursor-pointer shadow-sm "
                           >
                             Connect Zoom Account
                           </button>
@@ -2711,33 +2108,33 @@ export const AppWorkspace: React.FC<AppWorkspaceProps> = ({ onBackToLanding }) =
                 })()}
 
                 {/* Workspace task board */}
-                <div className="p-6 rounded-2xl bg-[#111113] border border-[#27272A] space-y-4 flex flex-col justify-between">
+                <div className="p-6 rounded-xl bg-surface border border-line space-y-4 flex flex-col justify-between">
                   <div className="space-y-3">
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-2.5">
-                        <div className="w-8 h-8 rounded-xl bg-purple-500/20 border border-purple-500/40 flex items-center justify-center text-purple-400 font-bold">
+                        <div className="w-8 h-8 rounded-xl bg-brand/20 border border-brand/40 flex items-center justify-center text-brand font-bold">
                           <Kanban className="w-4 h-4" />
                         </div>
                         <div>
-                          <div className="text-sm font-extrabold text-white">Workspace Tasks</div>
-                          <div className="text-[11px] font-mono text-slate-400">Meeting follow-up</div>
+                          <div className="text-sm font-semibold text-ink">Workspace Tasks</div>
+                          <div className="text-sm font-mono text-muted">Meeting follow-up</div>
                         </div>
                       </div>
 
-                      <span className="px-2.5 py-0.5 rounded-full text-[10px] font-mono font-bold bg-[#18181b] text-slate-400 border border-[#27272A]">
+                      <span className="px-2.5 py-0.5 rounded-full text-sm font-mono font-bold bg-surface text-muted border border-line">
                         Available
                       </span>
                     </div>
 
-                    <p className="text-xs text-slate-300 leading-relaxed">
+                    <p className="text-sm text-ink leading-relaxed">
                       Review extracted action items, correct owners and due dates, and track progress on the workspace board.
                     </p>
                   </div>
 
-                  <div className="flex items-center gap-2 pt-2 border-t border-[#27272A]">
+                  <div className="flex items-center gap-2 pt-2 border-t border-line">
                     <button
                       onClick={() => setActiveTab('kanban')}
-                      className="px-4 py-2 rounded-xl text-xs font-bold bg-[#18181b] hover:bg-[#27272A] text-slate-300 border border-[#27272A] transition-colors cursor-pointer"
+                      className="px-4 py-2 rounded-xl text-sm font-bold bg-surface hover:bg-line text-ink border border-line transition-colors cursor-pointer"
                     >
                       Open Task Board
                     </button>
@@ -2752,28 +2149,28 @@ export const AppWorkspace: React.FC<AppWorkspaceProps> = ({ onBackToLanding }) =
           {activeTab === 'notifications' && (
             <div className="space-y-6 animate-fadeIn">
               <div>
-                <h2 className="text-2xl font-extrabold text-white">Notifications & Activity</h2>
-                <p className="text-xs text-slate-400 mt-0.5">Live events generated during meeting processing.</p>
+                <h2 className="text-2xl font-semibold text-ink">Notifications & Activity</h2>
+                <p className="text-sm text-muted mt-0.5">Live events generated during meeting processing.</p>
               </div>
 
-              <div className="p-6 rounded-2xl bg-[#111113] border border-[#27272A] space-y-3">
+              <div className="p-6 rounded-xl bg-surface border border-line space-y-3">
                 {notifications && notifications.length > 0 ? (
                   notifications.map((n) => (
-                    <div key={n.id} className="p-4 rounded-xl bg-[#18181b] border border-[#27272A] flex items-center justify-between">
+                    <div key={n.id} className="p-4 rounded-xl bg-surface border border-line flex items-center justify-between">
                       <div>
-                        <div className="text-xs font-bold text-white flex items-center gap-2">
-                          <span className="w-2 h-2 rounded-full bg-[#8B5CF6]" />
+                        <div className="text-sm font-bold text-ink flex items-center gap-2">
+                          <span className="w-2 h-2 rounded-full bg-brand" />
                           <span>{n.message}</span>
                         </div>
-                        <div className="text-[10px] text-slate-400 font-mono mt-0.5 ml-4">
+                        <div className="text-sm text-muted font-mono mt-0.5 ml-4">
                           Type: {n.type}
                         </div>
                       </div>
-                      <span className="text-[10px] font-mono text-slate-500">{formatMeetingDate(n.created_at)}</span>
+                      <span className="text-sm font-mono text-muted">{formatMeetingDate(n.created_at)}</span>
                     </div>
                   ))
                 ) : (
-                  <p className="text-xs text-slate-500 italic text-center py-6">No recent notifications.</p>
+                  <p className="text-sm text-muted italic text-center py-6">No recent notifications.</p>
                 )}
               </div>
             </div>
@@ -2783,16 +2180,16 @@ export const AppWorkspace: React.FC<AppWorkspaceProps> = ({ onBackToLanding }) =
           {activeTab === 'settings' && (
             <div className="space-y-6 animate-fadeIn">
               <div>
-                <h2 className="text-2xl font-extrabold text-white">Workspace Settings</h2>
-                <p className="text-xs text-slate-400 mt-0.5">Manage your authenticated profile and workspace configuration.</p>
+                <h2 className="text-2xl font-semibold text-ink">Workspace Settings</h2>
+                <p className="text-sm text-muted mt-0.5">Manage your authenticated profile and workspace configuration.</p>
               </div>
 
               <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-                <div className="lg:col-span-4 p-4 rounded-2xl bg-[#111113] border border-[#27272A] space-y-1">
+                <div className="lg:col-span-4 p-4 rounded-xl bg-surface border border-line space-y-1">
                   <button
                     onClick={() => setSettingsTab('profile')}
-                    className={`w-full text-left px-3.5 py-2.5 rounded-xl text-xs font-bold transition-colors cursor-pointer ${
-                      settingsTab === 'profile' ? 'bg-[#8B5CF6] text-white' : 'text-slate-400 hover:text-white'
+                    className={`w-full text-left px-3.5 py-2.5 rounded-xl text-sm font-bold transition-colors cursor-pointer ${
+                      settingsTab === 'profile' ? 'bg-brand text-on-brand' : 'text-muted hover:text-ink'
                     }`}
                   >
                     User Profile
@@ -2800,97 +2197,95 @@ export const AppWorkspace: React.FC<AppWorkspaceProps> = ({ onBackToLanding }) =
 
                   <button
                     onClick={() => setSettingsTab('workspace')}
-                    className={`w-full text-left px-3.5 py-2.5 rounded-xl text-xs font-bold transition-colors cursor-pointer ${
-                      settingsTab === 'workspace' ? 'bg-[#8B5CF6] text-white' : 'text-slate-400 hover:text-white'
+                    className={`w-full text-left px-3.5 py-2.5 rounded-xl text-sm font-bold transition-colors cursor-pointer ${
+                      settingsTab === 'workspace' ? 'bg-brand text-on-brand' : 'text-muted hover:text-ink'
                     }`}
                   >
                     Workspace Details
                   </button>
 
                   <button onClick={() => setSettingsTab('voice')}
-                    className={`w-full text-left px-3.5 py-2.5 rounded-xl text-xs font-bold transition-colors cursor-pointer ${settingsTab === 'voice' ? 'bg-[#8B5CF6] text-white' : 'text-slate-400 hover:text-white'}`}>
+                    className={`w-full text-left px-3.5 py-2.5 rounded-xl text-sm font-bold transition-colors cursor-pointer ${settingsTab === 'voice' ? 'bg-brand text-on-brand' : 'text-muted hover:text-ink'}`}>
                     Bot Voice
                   </button>
-                  <button
-                    onClick={() => setSettingsTab('theme')}
-                    className={`w-full text-left px-3.5 py-2.5 rounded-xl text-xs font-bold transition-colors cursor-pointer ${
-                      settingsTab === 'theme' ? 'bg-[#8B5CF6] text-white' : 'text-slate-400 hover:text-white'
-                    }`}
-                  >
-                    Appearance & Theme
+                  <button onClick={() => setSettingsTab('appearance')}
+                    className={`w-full text-left px-3.5 py-2.5 rounded-xl text-sm font-bold transition-colors cursor-pointer ${settingsTab === 'appearance' ? 'bg-brand text-on-brand' : 'text-muted hover:text-ink'}`}>
+                    Appearance
                   </button>
+                  <LegalSettings />
                 </div>
 
-                <div className="lg:col-span-8 p-6 rounded-2xl bg-[#111113] border border-[#27272A] space-y-6">
+                <div className="lg:col-span-8 p-6 rounded-xl bg-surface border border-line space-y-6">
+                  {settingsTab === 'appearance' && <AppearanceSettings />}
                   {settingsTab === 'profile' && (
                     <div className="space-y-4">
-                      <h3 className="text-sm font-bold text-white uppercase tracking-wider">Profile Information</h3>
-                      <div className="space-y-3 text-xs">
+                      <h3 className="text-sm font-bold text-ink uppercase tracking-wider">Profile Information</h3>
+                      <div className="space-y-3 text-sm">
                         <div>
-                          <span className="text-slate-500 font-mono">Full Name:</span>
-                          <div className="text-white font-bold mt-1">{user?.fullName || user?.firstName || 'User'}</div>
+                          <span className="text-muted font-mono">Full Name:</span>
+                          <div className="text-ink font-bold mt-1">{user?.fullName || user?.firstName || 'User'}</div>
                         </div>
                         <div>
-                          <span className="text-slate-500 font-mono">Primary Email:</span>
-                          <div className="text-white font-bold mt-1">{user?.primaryEmailAddress?.emailAddress}</div>
+                          <span className="text-muted font-mono">Primary Email:</span>
+                          <div className="text-ink font-bold mt-1">{user?.primaryEmailAddress?.emailAddress}</div>
                         </div>
                         <div>
-                          <span className="text-slate-500 font-mono">Clerk User ID:</span>
-                          <div className="text-slate-400 font-mono text-[11px] mt-1">{user?.id}</div>
+                          <span className="text-muted font-mono">Account reference:</span>
+                          <div className="text-muted font-mono text-sm mt-1">{user?.id}</div>
                         </div>
                       </div>
                     </div>
                   )}
 
                   {settingsTab === 'voice' && activeWorkspace && (
-                    canManageWorkspace ? <PilotVoiceSettings key={activeWorkspace.id} workspaceId={activeWorkspace.id} getToken={getToken} /> : <p className="text-xs text-slate-400">Your manager chooses the workspace bot voice.</p>
+                    canManageWorkspace ? <PilotVoiceSettings key={activeWorkspace.id} workspaceId={activeWorkspace.id} getToken={getToken} /> : <p className="text-sm text-muted">Your manager chooses the workspace bot voice.</p>
                   )}
 
                   {settingsTab === 'workspace' && (
                     <div className="space-y-6">
                       <div className="space-y-4">
-                        <h3 className="text-sm font-bold text-white uppercase tracking-wider">Workspace Information</h3>
-                        <div className="space-y-3 text-xs">
+                        <h3 className="text-sm font-bold text-ink uppercase tracking-wider">Workspace Information</h3>
+                        <div className="space-y-3 text-sm">
                           <div>
-                            <span className="text-slate-500 font-mono">Workspace ID:</span>
-                            <div className="text-slate-400 font-mono text-[11px] mt-1">{activeWorkspace?.id}</div>
+                            <span className="text-muted font-mono">Workspace ID:</span>
+                            <div className="text-muted font-mono text-sm mt-1">{activeWorkspace?.id}</div>
                           </div>
                           <div>
-                            <span className="text-slate-500 font-mono">Workspace Name:</span>
+                            <span className="text-muted font-mono">Workspace Name:</span>
                             {editingWorkspaceName ? (
                               <form onSubmit={handleRenameWorkspace} className="flex items-center gap-2 mt-1">
                                 <input
                                   type="text"
                                   value={workspaceRenameInput}
                                   onChange={(e) => setWorkspaceRenameInput(e.target.value)}
-                                  className="px-3 py-1.5 rounded-lg bg-[#18181b] border border-[#8B5CF6] text-xs text-white focus:outline-none"
+                                  className="px-3 py-1.5 rounded-lg bg-surface border border-brand text-sm text-ink focus:outline-none"
                                   autoFocus
                                 />
                                 <button
                                   type="submit"
                                   disabled={savingWorkspaceName}
-                                  className="px-3 py-1.5 rounded-lg bg-[#8B5CF6] hover:bg-[#7c3aed] text-white text-xs font-bold transition-colors cursor-pointer"
+                                  className="px-3 py-1.5 rounded-lg bg-brand hover:bg-brand text-on-brand text-sm font-bold transition-colors cursor-pointer"
                                 >
                                   {savingWorkspaceName ? 'Saving...' : 'Save'}
                                 </button>
                                 <button
                                   type="button"
                                   onClick={() => setEditingWorkspaceName(false)}
-                                  className="px-3 py-1.5 rounded-lg bg-[#27272A] hover:bg-[#3f3f46] text-slate-300 text-xs transition-colors cursor-pointer"
+                                  className="px-3 py-1.5 rounded-lg bg-line hover:bg-line text-ink text-sm transition-colors cursor-pointer"
                                 >
                                   Cancel
                                 </button>
                               </form>
                             ) : (
                               <div className="flex items-center gap-2 mt-1">
-                                <span className="text-white font-bold">{activeWorkspace?.name}</span>
+                                <span className="text-ink font-bold">{activeWorkspace?.name}</span>
                                 <button
                                   disabled={!canManageWorkspace}
                                   onClick={() => {
                                     setWorkspaceRenameInput(activeWorkspace?.name || '');
                                     setEditingWorkspaceName(true);
                                   }}
-                                  className="text-[11px] text-[#8B5CF6] hover:underline font-mono cursor-pointer"
+                                  className="text-sm text-brand hover:underline font-mono cursor-pointer"
                                 >
                                   Rename
                                 </button>
@@ -2898,26 +2293,26 @@ export const AppWorkspace: React.FC<AppWorkspaceProps> = ({ onBackToLanding }) =
                             )}
                           </div>
                           <div>
-                            <span className="text-slate-500 font-mono">Total Meetings:</span>
-                            <div className="text-white font-bold mt-1">{meetings?.length || 0} recording(s)</div>
+                            <span className="text-muted font-mono">Total Meetings:</span>
+                            <div className="text-ink font-bold mt-1">{meetings?.length || 0} recording(s)</div>
                           </div>
                           <div>
-                            <span className="text-slate-500 font-mono">Team Members:</span>
-                            <div className="text-white font-bold mt-1">{members?.length || 0} member(s)</div>
+                            <span className="text-muted font-mono">Team Members:</span>
+                            <div className="text-ink font-bold mt-1">{members?.length || 0} member(s)</div>
                           </div>
                         </div>
                       </div>
 
                       {/* Danger Zone: Delete Workspace */}
                       {activeWorkspace && isWorkspaceOwner && (
-                        <div className="pt-6 border-t border-[#27272A] space-y-3">
-                          <div className="p-4 rounded-xl border border-red-500/30 bg-red-950/10 space-y-3">
-                            <div className="flex items-center gap-2 text-red-400">
+                        <div className="pt-6 border-t border-line space-y-3">
+                          <div className="p-4 rounded-xl border border-red-500/30 bg-red-50 space-y-3">
+                            <div className="flex items-center gap-2 text-red-700">
                               <AlertCircle className="w-4 h-4" />
-                              <h4 className="text-xs font-bold uppercase tracking-wider">Danger Zone</h4>
+                              <h4 className="text-sm font-bold uppercase tracking-wider">Danger Zone</h4>
                             </div>
-                            <p className="text-xs text-slate-300">
-                              Permanently delete <span className="font-bold text-white">"{activeWorkspace.name}"</span> and all associated recordings, audio files, diarized transcripts, and action items. This destructive action cannot be undone.
+                            <p className="text-sm text-ink">
+                              Permanently delete <span className="font-bold text-ink">"{activeWorkspace.name}"</span> and all associated recordings, audio files, diarized transcripts, and action items. This destructive action cannot be undone.
                             </p>
                             <div className="pt-1">
                               <button
@@ -2926,7 +2321,7 @@ export const AppWorkspace: React.FC<AppWorkspaceProps> = ({ onBackToLanding }) =
                                   setDeleteWorkspaceError(null);
                                   setDeleteWorkspaceModalOpen(true);
                                 }}
-                                className="px-4 py-2 rounded-xl bg-red-600/90 hover:bg-red-600 text-white text-xs font-bold flex items-center gap-2 cursor-pointer transition-colors shadow-lg shadow-red-900/20"
+                                className="px-4 py-2 rounded-xl bg-red-600/90 hover:bg-red-600 text-ink text-sm font-bold flex items-center gap-2 cursor-pointer transition-colors shadow-sm "
                               >
                                 <Trash2 className="w-3.5 h-3.5" />
                                 <span>Delete this Workspace</span>
@@ -2939,50 +2334,40 @@ export const AppWorkspace: React.FC<AppWorkspaceProps> = ({ onBackToLanding }) =
                   )}
 
 
-                  {settingsTab === 'theme' && (
-                    <div className="space-y-4">
-                      <h3 className="text-sm font-bold text-white uppercase tracking-wider">Theme Preferences</h3>
-                      <p className="text-xs text-slate-400">
-                        Dark Luxury (#09090B zinc neutral with #8B5CF6 violet accent) is active.
-                      </p>
-                      <div className="p-4 rounded-xl bg-[#09090B] border border-[#8B5CF6] text-xs font-bold text-white inline-block">
-                        Dark Luxury (Active)
-                      </div>
-                    </div>
-                  )}
+
                 </div>
               </div>
             </div>
           )}
         </main>
-      </div>
+      </WorkspaceShell>
 
       {/* MODALS */}
 
       {/* 1. Quick Upload Modal */}
       {uploadModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md">
-          <div className="relative w-full max-w-md rounded-2xl bg-[#111113] border border-[#27272A] p-6 text-slate-200 space-y-4 shadow-2xl">
-            <h3 className="text-lg font-bold text-white">Upload Meeting Audio</h3>
-            <p className="text-xs text-slate-400">
-              Upload meeting audio for local transcription and evidence-linked action items.
+        <Modal label="Upload a meeting recording" onClose={() => setUploadModalOpen(false)} busy={uploading}>
+          <div className="space-y-4">
+            <h3 className="text-lg font-bold text-ink">Upload Meeting Audio</h3>
+            <p className="text-sm text-muted">
+              Add a recording to create a transcript, summary and action items linked to the conversation.
             </p>
 
             <form onSubmit={handleUploadMeeting} className="space-y-4">
               <div className="space-y-1.5">
-                <label className="text-[11px] font-mono text-slate-400">Meeting Title</label>
+                <label className="text-sm font-mono text-muted">Meeting Title</label>
                 <input
                   type="text"
                   placeholder="e.g. Q3 Architecture & Security Review"
                   value={uploadTitle}
                   onChange={(e) => setUploadTitle(e.target.value)}
-                  className="w-full bg-[#18181b] border border-[#27272A] rounded-xl px-3.5 py-2 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-[#8B5CF6]"
+                  className="w-full bg-surface border border-line rounded-xl px-3.5 py-2 text-sm text-ink placeholder-slate-500 focus:outline-none focus:border-brand"
                 />
               </div>
 
               <MeetingLanguageSelect value={uploadLanguage} onChange={setUploadLanguage} disabled={uploading} />
               <div className="space-y-1.5">
-                <label className="text-[11px] font-mono text-slate-400">Select Audio File</label>
+                <label className="text-sm font-mono text-muted">Select Audio File</label>
                 <input
                   type="file"
                   accept="audio/*,video/*"
@@ -2994,12 +2379,12 @@ export const AppWorkspace: React.FC<AppWorkspaceProps> = ({ onBackToLanding }) =
                       }
                     }
                   }}
-                  className="w-full text-xs text-slate-400 file:mr-3 file:py-2 file:px-4 file:rounded-xl file:border-0 file:text-xs file:font-bold file:bg-[#8B5CF6] file:text-white hover:file:bg-[#7c3aed] cursor-pointer"
+                  className="w-full text-sm text-muted file:mr-3 file:py-2 file:px-4 file:rounded-xl file:border-0 file:text-sm file:font-bold file:bg-brand file:text-ink hover:file:bg-brand cursor-pointer"
                 />
               </div>
 
               {uploadProgressMsg && (
-                <div className="flex items-center gap-2 text-xs text-[#8B5CF6] font-mono">
+                <div className="flex items-center gap-2 text-sm text-brand font-mono">
                   <Loader2 className="w-3.5 h-3.5 animate-spin" />
                   <span>{uploadProgressMsg}</span>
                 </div>
@@ -3009,75 +2394,75 @@ export const AppWorkspace: React.FC<AppWorkspaceProps> = ({ onBackToLanding }) =
                 <button
                   type="button"
                   onClick={() => setUploadModalOpen(false)}
-                  className="px-4 py-2 rounded-xl bg-[#18181b] hover:bg-[#27272A] text-xs font-bold text-slate-400 transition-colors"
+                  className="px-4 py-2 rounded-xl bg-surface hover:bg-line text-sm font-bold text-muted transition-colors"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
                   disabled={!uploadFile || uploading}
-                  className="px-5 py-2 rounded-xl bg-[#8B5CF6] hover:bg-[#7c3aed] disabled:opacity-40 text-xs font-bold text-white transition-colors cursor-pointer shadow-lg shadow-[#8B5CF6]/20"
+                  className="px-5 py-2 rounded-xl bg-brand hover:bg-brand disabled:opacity-40 text-sm font-bold text-on-brand transition-colors cursor-pointer shadow-sm "
                 >
                   {uploading ? 'Uploading...' : 'Upload & Process'}
                 </button>
               </div>
             </form>
           </div>
-        </div>
+        </Modal>
       )}
 
       {/* Live In-Browser Microphone Recording Modal */}
       {recordModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/85 backdrop-blur-md animate-fadeIn">
-          <div className="relative w-full max-w-md rounded-2xl bg-[#111113] border border-[#27272A] p-6 text-slate-200 space-y-5 shadow-2xl shadow-black/80">
-            <div className="flex items-center justify-between border-b border-[#27272A] pb-3">
-              <div className="flex items-center gap-2.5 text-rose-400 font-bold text-sm">
-                <span className="w-2.5 h-2.5 rounded-full bg-rose-500 animate-ping" />
-                <Mic className="w-4 h-4 text-rose-400" />
-                <h3 className="text-white font-extrabold text-base">In-Browser Live Mic Recording</h3>
+        <Modal label="Record a meeting" onClose={() => setRecordModalOpen(false)} busy={isRecording || submittingRecording}>
+          <div className="space-y-4">
+            <div className="flex items-center justify-between border-b border-line pb-3">
+              <div className="flex items-center gap-2.5 text-rose-700 font-bold text-sm">
+                <span className="w-2.5 h-2.5 rounded-full bg-rose-500 " />
+                <Mic className="w-4 h-4 text-rose-700" />
+                <h3 className="text-ink font-semibold text-base">In-Browser Live Mic Recording</h3>
               </div>
-              <span className="text-[10px] font-mono uppercase text-slate-400 px-2 py-0.5 rounded bg-[#18181b]">
+              <span className="text-sm font-mono uppercase text-muted px-2 py-0.5 rounded bg-surface">
                 MediaRecorder
               </span>
             </div>
 
             <div className="space-y-4">
               <div className="space-y-1.5">
-                <label className="text-[11px] font-mono text-slate-400">Meeting / Session Title</label>
+                <label className="text-sm font-mono text-muted">Meeting / Session Title</label>
                 <input
                   type="text"
                   placeholder="e.g. Daily Standup / Customer Discovery"
                   value={liveRecordTitle}
                   onChange={(e) => setLiveRecordTitle(e.target.value)}
                   disabled={isRecording}
-                  className="w-full bg-[#18181b] border border-[#27272A] rounded-xl px-3.5 py-2 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-[#8B5CF6]"
+                  className="w-full bg-surface border border-line rounded-xl px-3.5 py-2 text-sm text-ink placeholder-slate-500 focus:outline-none focus:border-brand"
                 />
               </div>
 
               <MeetingLanguageSelect value={uploadLanguage} onChange={setUploadLanguage} disabled={isRecording || submittingRecording} />
               {/* Live Waveform & Timer Banner */}
-              <div className="p-6 rounded-2xl bg-[#18181b] border border-[#27272A] text-center space-y-3">
-                <div className="text-3xl font-extrabold font-mono tracking-wider text-white">
+              <div className="p-6 rounded-xl bg-surface border border-line text-center space-y-3">
+                <div className="text-3xl font-semibold font-mono tracking-wider text-ink">
                   {formatTimestampSeconds(recordingSeconds)}
                 </div>
 
                 {isRecording ? (
                   <div className="flex items-center justify-center gap-1.5 py-2">
-                    <div className="w-1.5 h-6 bg-rose-500 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
-                    <div className="w-1.5 h-10 bg-rose-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
-                    <div className="w-1.5 h-7 bg-rose-500 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
-                    <div className="w-1.5 h-12 bg-purple-500 rounded-full animate-bounce" style={{ animationDelay: '450ms' }} />
-                    <div className="w-1.5 h-8 bg-rose-400 rounded-full animate-bounce" style={{ animationDelay: '200ms' }} />
-                    <div className="w-1.5 h-5 bg-rose-500 rounded-full animate-bounce" style={{ animationDelay: '100ms' }} />
+                    <div className="w-1.5 h-6 bg-rose-500 rounded-full " style={{ animationDelay: '0ms' }} />
+                    <div className="w-1.5 h-10 bg-rose-400 rounded-full " style={{ animationDelay: '150ms' }} />
+                    <div className="w-1.5 h-7 bg-rose-500 rounded-full " style={{ animationDelay: '300ms' }} />
+                    <div className="w-1.5 h-12 bg-brand rounded-full " style={{ animationDelay: '450ms' }} />
+                    <div className="w-1.5 h-8 bg-rose-400 rounded-full " style={{ animationDelay: '200ms' }} />
+                    <div className="w-1.5 h-5 bg-rose-500 rounded-full " style={{ animationDelay: '100ms' }} />
                   </div>
                 ) : (
-                  <p className="text-xs text-slate-400">
+                  <p className="text-sm text-muted">
                     Click "Start Recording" to capture audio directly through your microphone.
                   </p>
                 )}
 
                 {isRecording && (
-                  <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-rose-500/10 text-rose-300 text-[11px] font-mono">
+                  <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-rose-500/10 text-rose-700 text-sm font-mono">
                     <span className="w-2 h-2 rounded-full bg-rose-500 animate-pulse" />
                     <span>Capturing live microphone audio stream...</span>
                   </div>
@@ -3085,8 +2470,8 @@ export const AppWorkspace: React.FC<AppWorkspaceProps> = ({ onBackToLanding }) =
               </div>
 
               {recordError && (
-                <div className="p-3 rounded-xl bg-rose-950/30 border border-rose-500/40 text-xs text-rose-300 flex items-center gap-2">
-                  <AlertCircle className="w-4 h-4 text-rose-400 shrink-0" />
+                <div className="p-3 rounded-xl bg-rose-50 border border-rose-500/40 text-sm text-rose-700 flex items-center gap-2">
+                  <AlertCircle className="w-4 h-4 text-rose-700 shrink-0" />
                   <span>{recordError}</span>
                 </div>
               )}
@@ -3096,7 +2481,7 @@ export const AppWorkspace: React.FC<AppWorkspaceProps> = ({ onBackToLanding }) =
                 <button
                   type="button"
                   onClick={cancelLiveRecording}
-                  className="px-4 py-2 rounded-xl bg-[#18181b] hover:bg-[#27272A] text-xs font-bold text-slate-400 hover:text-white transition-colors cursor-pointer"
+                  className="px-4 py-2 rounded-xl bg-surface hover:bg-line text-sm font-bold text-muted hover:text-ink transition-colors cursor-pointer"
                 >
                   Cancel
                 </button>
@@ -3105,7 +2490,8 @@ export const AppWorkspace: React.FC<AppWorkspaceProps> = ({ onBackToLanding }) =
                   <button
                     type="button"
                     onClick={startLiveRecording}
-                    className="px-5 py-2 rounded-xl bg-rose-600 hover:bg-rose-700 text-xs font-bold text-white transition-colors cursor-pointer shadow-lg shadow-rose-900/30 flex items-center gap-2"
+                    disabled={submittingRecording}
+                    className="px-5 py-2 rounded-xl bg-rose-600 hover:bg-rose-700 text-sm font-bold text-on-brand transition-colors cursor-pointer shadow-sm  flex items-center gap-2"
                   >
                     <Radio className="w-3.5 h-3.5" />
                     <span>Start Recording</span>
@@ -3115,7 +2501,7 @@ export const AppWorkspace: React.FC<AppWorkspaceProps> = ({ onBackToLanding }) =
                     type="button"
                     onClick={stopAndSubmitRecording}
                     disabled={submittingRecording}
-                    className="px-5 py-2 rounded-xl bg-[#8B5CF6] hover:bg-[#7c3aed] disabled:opacity-50 text-xs font-bold text-white transition-colors cursor-pointer shadow-lg shadow-[#8B5CF6]/30 flex items-center gap-2"
+                    className="px-5 py-2 rounded-xl bg-brand hover:bg-brand disabled:opacity-50 text-sm font-bold text-on-brand transition-colors cursor-pointer shadow-sm  flex items-center gap-2"
                   >
                     {submittingRecording ? (
                       <>
@@ -3133,27 +2519,27 @@ export const AppWorkspace: React.FC<AppWorkspaceProps> = ({ onBackToLanding }) =
               </div>
             </div>
           </div>
-        </div>
+        </Modal>
       )}
 
 
       {/* 2. Create Workspace Modal */}
       {newWorkspaceModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md">
-          <div className="relative w-full max-w-md rounded-2xl bg-[#111113] border border-[#27272A] p-6 text-slate-200 space-y-4 shadow-2xl">
-            <h3 className="text-lg font-extrabold text-white">Create New Workspace</h3>
-            <p className="text-xs text-slate-400">Isolate meetings, transcripts, and action items for a team.</p>
+        <Modal label="Create workspace" onClose={() => setNewWorkspaceModalOpen(false)} busy={creatingWorkspace}>
+          <div className="space-y-4">
+            <h3 className="text-lg font-semibold text-ink">Create New Workspace</h3>
+            <p className="text-sm text-muted">Isolate meetings, transcripts, and action items for a team.</p>
 
             <form onSubmit={handleCreateWorkspace} className="space-y-4">
               <div className="space-y-1.5">
-                <label className="text-[11px] font-mono text-slate-400">Workspace Name</label>
+                <label className="text-sm font-mono text-muted">Workspace Name</label>
                 <input
                   type="text"
                   placeholder="e.g. Platform Architecture"
                   value={newWorkspaceName}
                   onChange={(e) => setNewWorkspaceName(e.target.value)}
                   autoFocus
-                  className="w-full bg-[#18181b] border border-[#27272A] rounded-xl px-3.5 py-2.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-[#8B5CF6]"
+                  className="w-full bg-surface border border-line rounded-xl px-3.5 py-2.5 text-sm text-ink placeholder-slate-500 focus:outline-none focus:border-brand"
                 />
               </div>
 
@@ -3161,40 +2547,40 @@ export const AppWorkspace: React.FC<AppWorkspaceProps> = ({ onBackToLanding }) =
                 <button
                   type="button"
                   onClick={() => setNewWorkspaceModalOpen(false)}
-                  className="px-4 py-2 rounded-xl border border-[#27272A] text-xs font-semibold text-slate-400 hover:text-white transition-colors"
+                  className="px-4 py-2 rounded-xl border border-line text-sm font-semibold text-muted hover:text-ink transition-colors"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
                   disabled={!newWorkspaceName.trim() || creatingWorkspace}
-                  className="px-4 py-2 rounded-xl bg-[#8B5CF6] hover:bg-[#7c3aed] disabled:opacity-50 text-xs font-bold text-white transition-colors cursor-pointer shadow-lg shadow-[#8B5CF6]/20"
+                  className="px-4 py-2 rounded-xl bg-brand hover:bg-brand disabled:opacity-50 text-sm font-bold text-on-brand transition-colors cursor-pointer shadow-sm "
                 >
                   {creatingWorkspace ? 'Creating...' : 'Create Workspace'}
                 </button>
               </div>
             </form>
           </div>
-        </div>
+        </Modal>
       )}
 
       {/* Discord Webhook Configuration Modal */}
       {discordModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-fadeIn">
-          <div className="relative w-full max-w-md rounded-2xl bg-[#111113] border border-[#27272A] p-6 text-slate-200 space-y-4 shadow-2xl">
+        <Modal label="Connect Discord" onClose={() => setDiscordModalOpen(false)} busy={savingDiscord}>
+          <div className="space-y-4">
             <div className="flex items-center gap-2.5 text-[#5865F2]">
               <div className="w-8 h-8 rounded-xl bg-[#5865F2]/20 border border-[#5865F2]/40 flex items-center justify-center text-[#5865F2] font-bold">
                 #
               </div>
               <div>
-                <h3 className="text-lg font-bold text-white">Configure Discord Webhook</h3>
-                <p className="text-xs text-slate-400">Post automated meeting digests to your Discord channel.</p>
+                <h3 className="text-lg font-bold text-ink">Configure Discord Webhook</h3>
+                <p className="text-sm text-muted">Post automated meeting digests to your Discord channel.</p>
               </div>
             </div>
 
             <form onSubmit={handleSaveDiscordWebhook} className="space-y-4">
               <div className="space-y-1.5">
-                <label className="text-[11px] font-mono text-slate-400">Discord Webhook URL</label>
+                <label className="text-sm font-mono text-muted">Discord Webhook URL</label>
                 <input
                   type="url"
                   placeholder="https://discord.com/api/webhooks/..."
@@ -3202,13 +2588,13 @@ export const AppWorkspace: React.FC<AppWorkspaceProps> = ({ onBackToLanding }) =
                   onChange={(e) => setDiscordWebhookInput(e.target.value)}
                   required
                   autoFocus
-                  className="w-full bg-[#18181b] border border-[#27272A] rounded-xl px-3.5 py-2 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-[#8B5CF6]"
+                  className="w-full bg-surface border border-line rounded-xl px-3.5 py-2 text-sm text-ink placeholder-slate-500 focus:outline-none focus:border-brand"
                 />
               </div>
 
-              <div className="p-3 rounded-xl bg-[#18181b] border border-[#27272A] text-[11px] text-slate-400 space-y-1">
-                <div className="font-bold text-white flex items-center gap-1.5">
-                  <Shield className="w-3.5 h-3.5 text-emerald-400" />
+              <div className="p-3 rounded-xl bg-surface border border-line text-sm text-muted space-y-1">
+                <div className="font-bold text-ink flex items-center gap-1.5">
+                  <Shield className="w-3.5 h-3.5 text-emerald-700" />
                   <span>Encrypted at Rest</span>
                 </div>
                 <p>
@@ -3220,14 +2606,14 @@ export const AppWorkspace: React.FC<AppWorkspaceProps> = ({ onBackToLanding }) =
                 <button
                   type="button"
                   onClick={() => setDiscordModalOpen(false)}
-                  className="px-4 py-2 rounded-xl bg-[#18181b] hover:bg-[#27272A] text-xs font-bold text-slate-400 transition-colors cursor-pointer"
+                  className="px-4 py-2 rounded-xl bg-surface hover:bg-line text-sm font-bold text-muted transition-colors cursor-pointer"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
                   disabled={savingDiscord || !discordWebhookInput.trim()}
-                  className="px-5 py-2 rounded-xl bg-[#8B5CF6] hover:bg-[#7c3aed] disabled:opacity-50 text-xs font-bold text-white transition-colors cursor-pointer shadow-lg shadow-[#8B5CF6]/20 flex items-center gap-2"
+                  className="px-5 py-2 rounded-xl bg-brand hover:bg-brand disabled:opacity-50 text-sm font-bold text-on-brand transition-colors cursor-pointer shadow-sm  flex items-center gap-2"
                 >
                   {savingDiscord ? (
                     <>
@@ -3241,59 +2627,60 @@ export const AppWorkspace: React.FC<AppWorkspaceProps> = ({ onBackToLanding }) =
               </div>
             </form>
           </div>
-        </div>
+        </Modal>
       )}
 
       {/* Zoom Cloud Recordings Picker Modal */}
       {zoomPickerOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/85 backdrop-blur-md animate-fadeIn">
-          <div className="relative w-full max-w-2xl rounded-2xl bg-[#111113] border border-[#27272A] p-6 text-slate-200 space-y-5 shadow-2xl shadow-black/80 max-h-[85vh] flex flex-col">
-            <div className="flex items-center justify-between border-b border-[#27272A] pb-3">
-              <div className="flex items-center gap-2.5 text-sky-400">
-                <div className="w-8 h-8 rounded-xl bg-sky-500/20 border border-sky-500/40 flex items-center justify-center text-sky-400 font-bold">
+        <Modal label="Import a Zoom recording" onClose={() => setZoomPickerOpen(false)} busy={Boolean(importingZoomId)} className="mp-wide-modal">
+          <div className="space-y-4">
+            <div className="flex items-center justify-between border-b border-line pb-3">
+              <div className="flex items-center gap-2.5 text-sky-700">
+                <div className="w-8 h-8 rounded-xl bg-sky-500/20 border border-sky-500/40 flex items-center justify-center text-sky-700 font-bold">
                   <Radio className="w-4 h-4" />
                 </div>
                 <div>
-                  <h3 className="text-base font-extrabold text-white">Import Zoom Cloud Recordings</h3>
-                  <p className="text-xs text-slate-400">Select a recording to process with your configured local models.</p>
+                  <h3 className="text-base font-semibold text-ink">Import Zoom Cloud Recordings</h3>
+                  <p className="text-sm text-muted">Select a recording to process with your configured local models.</p>
                 </div>
               </div>
 
               <button
                 onClick={() => setZoomPickerOpen(false)}
-                className="p-1.5 rounded-xl bg-[#18181b] hover:bg-[#27272A] text-slate-400 hover:text-white cursor-pointer"
+                aria-label="Close Zoom recordings"
+                className="p-1.5 rounded-xl bg-surface hover:bg-line text-muted hover:text-ink cursor-pointer"
               >
-                ✕
+                <span aria-hidden="true">&times;</span>
               </button>
             </div>
 
             <div className="flex-1 overflow-y-auto space-y-3 pr-1">
               {loadingZoomRecordings ? (
                 <div className="p-12 text-center space-y-3">
-                  <Loader2 className="w-8 h-8 text-sky-400 animate-spin mx-auto" />
-                  <p className="text-xs text-slate-400">Fetching cloud recordings from Zoom API...</p>
+                  <Loader2 className="w-8 h-8 text-sky-700 animate-spin mx-auto" />
+                  <p className="text-sm text-muted">Fetching cloud recordings from Zoom API...</p>
                 </div>
               ) : zoomRecordings.length === 0 ? (
-                <div className="p-12 text-center border border-dashed border-[#27272A] rounded-2xl space-y-2">
-                  <Radio className="w-8 h-8 text-slate-500 mx-auto" />
-                  <p className="text-xs text-slate-400">No cloud recordings found in the last 30 days.</p>
+                <div className="p-12 text-center border border-dashed border-line rounded-xl space-y-2">
+                  <Radio className="w-8 h-8 text-muted mx-auto" />
+                  <p className="text-sm text-muted">No cloud recordings found in the last 30 days.</p>
                 </div>
               ) : (
                 zoomRecordings.map((rec) => (
                   <div
                     key={rec.id}
-                    className="p-4 rounded-xl bg-[#18181b] border border-[#27272A] flex items-center justify-between gap-4 hover:border-sky-500/40 transition-colors"
+                    className="p-4 rounded-xl bg-surface border border-line flex items-center justify-between gap-4 hover:border-sky-500/40 transition-colors"
                   >
                     <div className="space-y-1">
-                      <div className="text-xs font-bold text-white flex items-center gap-2">
+                      <div className="text-sm font-bold text-ink flex items-center gap-2">
                         <span>{rec.topic}</span>
-                        <span className="px-2 py-0.5 rounded bg-sky-500/20 text-sky-300 font-mono text-[10px] uppercase font-bold">
+                        <span className="px-2 py-0.5 rounded bg-sky-500/20 text-sky-700 font-mono text-sm uppercase font-bold">
                           {rec.file_type}
                         </span>
                       </div>
-                      <div className="text-[11px] text-slate-400 flex items-center gap-3">
+                      <div className="text-sm text-muted flex items-center gap-3">
                         <span>{formatMeetingDate(rec.start_time)}</span>
-                        <span>•</span>
+                        <span aria-hidden="true">&bull;</span>
                         <span>{rec.duration} mins</span>
                       </div>
                     </div>
@@ -3301,7 +2688,7 @@ export const AppWorkspace: React.FC<AppWorkspaceProps> = ({ onBackToLanding }) =
                     <button
                       onClick={() => handleImportZoomRecording(rec)}
                       disabled={importingZoomId === rec.id}
-                      className="px-4 py-2 rounded-xl bg-sky-600 hover:bg-sky-500 disabled:opacity-50 text-white text-xs font-bold transition-all shadow-md shadow-sky-900/30 shrink-0 flex items-center gap-2 cursor-pointer"
+                      className="px-4 py-2 rounded-xl bg-sky-600 hover:bg-sky-500 disabled:opacity-50 text-on-brand text-sm font-bold transition-all shadow-md  shrink-0 flex items-center gap-2 cursor-pointer"
                     >
                       {importingZoomId === rec.id ? (
                         <>
@@ -3320,46 +2707,46 @@ export const AppWorkspace: React.FC<AppWorkspaceProps> = ({ onBackToLanding }) =
               )}
             </div>
 
-            <div className="flex justify-end pt-2 border-t border-[#27272A]">
+            <div className="flex justify-end pt-2 border-t border-line">
               <button
                 type="button"
                 onClick={() => setZoomPickerOpen(false)}
-                className="px-4 py-2 rounded-xl bg-[#18181b] hover:bg-[#27272A] text-xs font-bold text-slate-400 transition-colors cursor-pointer"
+                className="px-4 py-2 rounded-xl bg-surface hover:bg-line text-sm font-bold text-muted transition-colors cursor-pointer"
               >
                 Close
               </button>
             </div>
           </div>
-        </div>
+        </Modal>
       )}
 
       {/* 3. Invite Member Modal */}
       {inviteModalOpen && (
 
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md">
-          <div className="relative w-full max-w-md rounded-2xl bg-[#111113] border border-[#27272A] p-6 text-slate-200 space-y-4 shadow-2xl">
-            <h3 className="text-lg font-extrabold text-white">Invite Teammate</h3>
-            <p className="text-xs text-slate-400">Add a registered user by email to {activeWorkspace?.name}.</p>
+        <Modal label="Invite a teammate" onClose={() => setInviteModalOpen(false)} busy={inviting}>
+          <div className="space-y-4">
+            <h3 className="text-lg font-semibold text-ink">Invite Teammate</h3>
+            <p className="text-sm text-muted">Add a registered user by email to {activeWorkspace?.name}.</p>
 
             <form onSubmit={handleInviteMember} className="space-y-4">
               <div className="space-y-1.5">
-                <label className="text-[11px] font-mono text-slate-400">Teammate Email</label>
+                <label className="text-sm font-mono text-muted">Teammate Email</label>
                 <input
                   type="email"
                   placeholder="e.g. sarah@acme.dev"
                   value={inviteEmail}
                   onChange={(e) => setInviteEmail(e.target.value)}
                   autoFocus
-                  className="w-full bg-[#18181b] border border-[#27272A] rounded-xl px-3.5 py-2.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-[#8B5CF6]"
+                  className="w-full bg-surface border border-line rounded-xl px-3.5 py-2.5 text-sm text-ink placeholder-slate-500 focus:outline-none focus:border-brand"
                 />
               </div>
 
               <div className="space-y-1.5">
-                <label className="text-[11px] font-mono text-slate-400">Workspace Role</label>
+                <label className="text-sm font-mono text-muted">Workspace Role</label>
                 <select
                   value={inviteRole}
                   onChange={(e) => setInviteRole(e.target.value as 'admin' | 'member')}
-                  className="w-full bg-[#18181b] border border-[#27272A] rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-none focus:border-[#8B5CF6]"
+                  className="w-full bg-surface border border-line rounded-xl px-3.5 py-2.5 text-sm text-ink focus:outline-none focus:border-brand"
                 >
                   <option value="member">Teammate (Use knowledge & meetings)</option>
                   {isWorkspaceOwner && <option value="admin">Manager (Manage Workspace)</option>}
@@ -3370,43 +2757,43 @@ export const AppWorkspace: React.FC<AppWorkspaceProps> = ({ onBackToLanding }) =
                 <button
                   type="button"
                   onClick={() => setInviteModalOpen(false)}
-                  className="px-4 py-2 rounded-xl border border-[#27272A] text-xs font-semibold text-slate-400 hover:text-white transition-colors"
+                  className="px-4 py-2 rounded-xl border border-line text-sm font-semibold text-muted hover:text-ink transition-colors"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
                   disabled={!inviteEmail.trim() || inviting}
-                  className="px-4 py-2 rounded-xl bg-[#8B5CF6] hover:bg-[#7c3aed] disabled:opacity-50 text-xs font-bold text-white transition-colors cursor-pointer shadow-lg shadow-[#8B5CF6]/20"
+                  className="px-4 py-2 rounded-xl bg-brand hover:bg-brand disabled:opacity-50 text-sm font-bold text-on-brand transition-colors cursor-pointer shadow-sm "
                 >
                   {inviting ? 'Inviting...' : 'Send Invite'}
                 </button>
               </div>
             </form>
           </div>
-        </div>
+        </Modal>
       )}
 
       {/* 4. Delete Workspace Confirmation Modal */}
       {deleteWorkspaceModalOpen && activeWorkspace && (
 
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/85 backdrop-blur-md animate-fadeIn">
-          <div className="relative w-full max-w-md rounded-2xl bg-[#111113] border border-red-500/40 p-6 text-slate-200 space-y-5 shadow-2xl shadow-red-950/50">
-            <div className="flex items-center gap-3 text-red-400">
-              <div className="p-2 rounded-xl bg-red-950/50 border border-red-500/30">
-                <AlertCircle className="w-5 h-5 text-red-400" />
+        <Modal label="Delete workspace" onClose={() => setDeleteWorkspaceModalOpen(false)} busy={deletingWorkspace}>
+          <div className="space-y-4">
+            <div className="flex items-center gap-3 text-red-700">
+              <div className="p-2 rounded-xl bg-red-50 border border-red-500/30">
+                <AlertCircle className="w-5 h-5 text-red-700" />
               </div>
               <div>
-                <h3 className="text-base font-extrabold text-white">Delete Workspace</h3>
-                <p className="text-[11px] text-red-400 font-mono">Destructive Action Confirmation</p>
+                <h3 className="text-base font-semibold text-ink">Delete Workspace</h3>
+                <p className="text-sm text-red-700 font-mono">Destructive Action Confirmation</p>
               </div>
             </div>
 
-            <div className="p-3.5 rounded-xl bg-[#18181b] border border-[#27272A] text-xs text-slate-300 space-y-2">
+            <div className="p-3.5 rounded-xl bg-surface border border-line text-sm text-ink space-y-2">
               <p>
-                Are you sure you want to permanently delete <strong className="text-white font-bold">{activeWorkspace.name}</strong>?
+                Are you sure you want to permanently delete <strong className="text-ink font-bold">{activeWorkspace.name}</strong>?
               </p>
-              <ul className="list-disc pl-4 space-y-1 text-slate-400 text-[11px]">
+              <ul className="list-disc pl-4 space-y-1 text-muted text-sm">
                 <li>All meetings and uploaded audio recordings will be deleted from disk.</li>
                 <li>All transcripts, summaries, and action items will be removed.</li>
                 <li>Team memberships for this workspace will be revoked.</li>
@@ -3415,8 +2802,8 @@ export const AppWorkspace: React.FC<AppWorkspaceProps> = ({ onBackToLanding }) =
 
             <form onSubmit={handleDeleteWorkspace} className="space-y-4">
               <div className="space-y-1.5">
-                <label className="text-[11px] font-mono text-slate-400">
-                  Type <span className="text-red-400 font-bold underline select-all">{activeWorkspace.name}</span> to confirm:
+                <label className="text-sm font-mono text-muted">
+                  Type <span className="text-red-700 font-bold underline select-all">{activeWorkspace.name}</span> to confirm:
                 </label>
                 <input
                   type="text"
@@ -3427,12 +2814,12 @@ export const AppWorkspace: React.FC<AppWorkspaceProps> = ({ onBackToLanding }) =
                     if (deleteWorkspaceError) setDeleteWorkspaceError(null);
                   }}
                   autoFocus
-                  className="w-full bg-[#18181b] border border-red-500/30 rounded-xl px-3.5 py-2.5 text-xs text-white placeholder-slate-600 focus:outline-none focus:border-red-500 font-mono"
+                  className="w-full bg-surface border border-red-500/30 rounded-xl px-3.5 py-2.5 text-sm text-ink placeholder-slate-600 focus:outline-none focus:border-red-500 font-mono"
                 />
               </div>
 
               {deleteWorkspaceError && (
-                <div className="text-xs text-red-400 font-mono flex items-center gap-1.5">
+                <div className="text-sm text-red-700 font-mono flex items-center gap-1.5">
                   <AlertCircle className="w-3.5 h-3.5" />
                   <span>{deleteWorkspaceError}</span>
                 </div>
@@ -3446,7 +2833,7 @@ export const AppWorkspace: React.FC<AppWorkspaceProps> = ({ onBackToLanding }) =
                     setDeleteConfirmText('');
                     setDeleteWorkspaceError(null);
                   }}
-                  className="px-4 py-2 rounded-xl bg-[#18181b] hover:bg-[#27272A] text-xs font-bold text-slate-300 transition-colors cursor-pointer"
+                  className="px-4 py-2 rounded-xl bg-surface hover:bg-line text-sm font-bold text-ink transition-colors cursor-pointer"
                 >
                   Cancel
                 </button>
@@ -3456,7 +2843,7 @@ export const AppWorkspace: React.FC<AppWorkspaceProps> = ({ onBackToLanding }) =
                     deleteConfirmText.trim().toLowerCase() !== activeWorkspace.name.trim().toLowerCase() ||
                     deletingWorkspace
                   }
-                  className="px-5 py-2 rounded-xl bg-red-600 hover:bg-red-700 disabled:opacity-40 text-xs font-bold text-white transition-colors cursor-pointer shadow-lg shadow-red-900/30 flex items-center gap-2"
+                  className="px-5 py-2 rounded-xl bg-red-600 hover:bg-red-700 disabled:opacity-40 text-sm font-bold text-on-brand transition-colors cursor-pointer shadow-sm  flex items-center gap-2"
                 >
                   {deletingWorkspace ? (
                     <>
@@ -3473,10 +2860,10 @@ export const AppWorkspace: React.FC<AppWorkspaceProps> = ({ onBackToLanding }) =
               </div>
             </form>
           </div>
-        </div>
+        </Modal>
       )}
 
-      {/* Step C1 & C3: Live Google Meet Capture & Mandatory Legal Consent Modal */}
+      {/* Live meeting form; the action provider handles first-use acknowledgment. */}
       {joinWorkspaceOpen && <JoinWorkspaceModal getToken={getToken} onChange={mutateWorkspaces} onEnter={enterApprovedWorkspace} onClose={() => setJoinWorkspaceOpen(false)} />}
       <LiveMeetingModal
         initialMeetingUrl={retryLiveMeetingUrl}
@@ -3488,23 +2875,23 @@ export const AppWorkspace: React.FC<AppWorkspaceProps> = ({ onBackToLanding }) =
           mutateMeetings();
           setSelectedMeetingId(created.id);
           setActiveTab('meeting');
-          showToast(`Joined Google Meet call! Bot is actively transcribing.`);
+          showToast(`Assistant requested. Admission may be required before capture starts.`);
         }}
       />
 
       {/* Floating Feedback Toast */}
       {toastMessage && (
-        <div
-          className={`fixed bottom-6 right-6 z-50 flex items-center gap-3 px-4 py-3 rounded-2xl border shadow-2xl text-xs font-semibold animate-fadeIn ${
+        <div role="status" aria-live="polite"
+          className={`fixed bottom-6 right-6 z-50 flex items-center gap-3 px-4 py-3 rounded-xl border shadow-sm text-sm font-semibold animate-fadeIn ${
             toastMessage.type === 'error'
-              ? 'bg-rose-950/90 border-rose-500/50 text-rose-200'
-              : 'bg-[#111113]/95 border-[#8B5CF6]/50 text-white shadow-[#8B5CF6]/20'
+              ? 'bg-rose-50 border-rose-500/50 text-rose-700'
+              : 'bg-surface/95 border-brand/50 text-ink '
           }`}
         >
           {toastMessage.type === 'error' ? (
-            <AlertCircle className="w-4 h-4 text-rose-400 shrink-0" />
+            <AlertCircle className="w-4 h-4 text-rose-700 shrink-0" />
           ) : (
-            <CheckCircle2 className="w-4 h-4 text-[#8B5CF6] shrink-0" />
+            <CheckCircle2 className="w-4 h-4 text-brand shrink-0" />
           )}
           <span>{toastMessage.text}</span>
         </div>

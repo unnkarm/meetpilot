@@ -28,58 +28,58 @@ export const MeetingAtAGlance: React.FC<MeetingAtAGlanceProps> = ({
   return (
     <div className="grid grid-cols-2 md:grid-cols-4 gap-3.5">
       {/* 1. Duration */}
-      <div className="p-4 rounded-xl bg-[#111113] border border-[#27272A] flex items-center gap-3.5 shadow-sm hover:border-[#8B5CF6]/30 transition-colors">
-        <div className="w-10 h-10 rounded-xl bg-[#8B5CF6]/10 border border-[#8B5CF6]/20 flex items-center justify-center text-[#8B5CF6] shrink-0">
+      <div className="p-4 rounded-xl bg-surface border border-line flex items-center gap-3.5 shadow-sm hover:border-brand/30 transition-colors">
+        <div className="w-10 h-10 rounded-xl bg-brand/10 border border-brand/20 flex items-center justify-center text-brand shrink-0">
           <Clock className="w-5 h-5" />
         </div>
         <div>
-          <div className="text-[11px] font-mono uppercase tracking-wider text-slate-500 font-semibold">
+          <div className="text-sm font-mono uppercase tracking-wider text-muted font-semibold">
             Duration
           </div>
-          <div className="text-lg font-black text-white">{formatDurationDisplay(durationSeconds)}</div>
-          <div className="text-[10px] text-slate-400 font-medium">Meeting audio</div>
+          <div className="text-lg font-semibold text-ink">{formatDurationDisplay(durationSeconds)}</div>
+          <div className="text-sm text-muted font-medium">Meeting audio</div>
         </div>
       </div>
 
       {/* 2. Detected Speakers */}
-      <div className="p-4 rounded-xl bg-[#111113] border border-[#27272A] flex items-center gap-3.5 shadow-sm hover:border-cyan-500/30 transition-colors">
-        <div className="w-10 h-10 rounded-xl bg-cyan-500/10 border border-cyan-500/20 flex items-center justify-center text-cyan-400 shrink-0">
+      <div className="p-4 rounded-xl bg-surface border border-line flex items-center gap-3.5 shadow-sm hover:border-cyan-500/30 transition-colors">
+        <div className="w-10 h-10 rounded-xl bg-cyan-500/10 border border-cyan-500/20 flex items-center justify-center text-cyan-700 shrink-0">
           <Users className="w-5 h-5" />
         </div>
         <div>
-          <div className="text-[11px] font-mono uppercase tracking-wider text-slate-500 font-semibold">
+          <div className="text-sm font-mono uppercase tracking-wider text-muted font-semibold">
             Speakers
           </div>
-          <div className="text-lg font-black text-white">{speakerStats.detectedCount} Detected</div>
-          <div className="text-[10px] text-cyan-400 font-medium">Transcript speaker labels</div>
+          <div className="text-lg font-semibold text-ink">{speakerStats.detectedCount} Detected</div>
+          <div className="text-sm text-cyan-700 font-medium">Transcript speaker labels</div>
         </div>
       </div>
 
       {/* 3. Consensus Decisions */}
-      <div className="p-4 rounded-xl bg-[#111113] border border-[#27272A] flex items-center gap-3.5 shadow-sm hover:border-amber-500/30 transition-colors">
-        <div className="w-10 h-10 rounded-xl bg-amber-500/10 border border-amber-500/20 flex items-center justify-center text-amber-400 shrink-0">
+      <div className="p-4 rounded-xl bg-surface border border-line flex items-center gap-3.5 shadow-sm hover:border-amber-500/30 transition-colors">
+        <div className="w-10 h-10 rounded-xl bg-amber-500/10 border border-amber-500/20 flex items-center justify-center text-amber-700 shrink-0">
           <Sparkles className="w-5 h-5" />
         </div>
         <div>
-          <div className="text-[11px] font-mono uppercase tracking-wider text-slate-500 font-semibold">
+          <div className="text-sm font-mono uppercase tracking-wider text-muted font-semibold">
             Decisions
           </div>
-          <div className="text-lg font-black text-white">{decisionsCount} Logged</div>
-          <div className="text-[10px] text-amber-400 font-medium">Agreement consensus</div>
+          <div className="text-lg font-semibold text-ink">{decisionsCount} Logged</div>
+          <div className="text-sm text-amber-700 font-medium">Agreement consensus</div>
         </div>
       </div>
 
       {/* 4. Action Items */}
-      <div className="p-4 rounded-xl bg-[#111113] border border-[#27272A] flex items-center gap-3.5 shadow-sm hover:border-emerald-500/30 transition-colors">
-        <div className="w-10 h-10 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-400 shrink-0">
+      <div className="p-4 rounded-xl bg-surface border border-line flex items-center gap-3.5 shadow-sm hover:border-emerald-500/30 transition-colors">
+        <div className="w-10 h-10 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-700 shrink-0">
           <CheckSquare className="w-5 h-5" />
         </div>
         <div>
-          <div className="text-[11px] font-mono uppercase tracking-wider text-slate-500 font-semibold">
+          <div className="text-sm font-mono uppercase tracking-wider text-muted font-semibold">
             Action Items
           </div>
-          <div className="text-lg font-black text-white">{tasksCount} Extracted</div>
-          <div className="text-[10px] text-emerald-400 font-medium">
+          <div className="text-lg font-semibold text-ink">{tasksCount} Extracted</div>
+          <div className="text-sm text-emerald-700 font-medium">
             {completedTasksCount > 0 ? `${completedTasksCount} completed` : 'Kanban synchronized'}
           </div>
         </div>

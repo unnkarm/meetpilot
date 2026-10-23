@@ -37,52 +37,52 @@ const STATUS_CONFIG: Record<
   completed: {
     label: 'Completed',
     bg: 'bg-emerald-500/10',
-    text: 'text-emerald-400',
+    text: 'text-emerald-700',
     border: 'border-emerald-500/30',
     icon: <CheckCircle2 className="w-3.5 h-3.5" />,
   },
   processing: {
     label: 'Processing',
     bg: 'bg-amber-500/10',
-    text: 'text-amber-400',
+    text: 'text-amber-700',
     border: 'border-amber-500/30',
     icon: <Loader2 className="w-3.5 h-3.5 animate-spin" />,
   },
   transcribing: {
-    label: 'Transcribing', bg: 'bg-purple-500/10', text: 'text-purple-400',
-    border: 'border-purple-500/30', icon: <Loader2 className="w-3.5 h-3.5 animate-spin" />,
+    label: 'Transcribing', bg: 'bg-brand/10', text: 'text-brand',
+    border: 'border-brand/30', icon: <Loader2 className="w-3.5 h-3.5 animate-spin" />,
   },
   transcribed: {
-    label: 'Transcript ready', bg: 'bg-purple-500/10', text: 'text-purple-400',
-    border: 'border-purple-500/30', icon: <Loader2 className="w-3.5 h-3.5 animate-spin" />,
+    label: 'Transcript ready', bg: 'bg-brand/10', text: 'text-brand',
+    border: 'border-brand/30', icon: <Loader2 className="w-3.5 h-3.5 animate-spin" />,
   },
   embedding: {
-    label: 'Indexing', bg: 'bg-purple-500/10', text: 'text-purple-400',
-    border: 'border-purple-500/30', icon: <Loader2 className="w-3.5 h-3.5 animate-spin" />,
+    label: 'Indexing', bg: 'bg-brand/10', text: 'text-brand',
+    border: 'border-brand/30', icon: <Loader2 className="w-3.5 h-3.5 animate-spin" />,
   },
   analyzing: {
-    label: 'Analyzing', bg: 'bg-purple-500/10', text: 'text-purple-400',
-    border: 'border-purple-500/30', icon: <Loader2 className="w-3.5 h-3.5 animate-spin" />,
+    label: 'Analyzing', bg: 'bg-brand/10', text: 'text-brand',
+    border: 'border-brand/30', icon: <Loader2 className="w-3.5 h-3.5 animate-spin" />,
   },
   queued: {
     label: 'Queued',
     bg: 'bg-blue-500/10',
-    text: 'text-blue-400',
+    text: 'text-blue-700',
     border: 'border-blue-500/30',
     icon: <Clock className="w-3.5 h-3.5" />,
   },
   failed: {
     label: 'Failed',
     bg: 'bg-rose-500/10',
-    text: 'text-rose-400',
+    text: 'text-rose-700',
     border: 'border-rose-500/30',
     icon: <AlertCircle className="w-3.5 h-3.5" />,
   },
   in_progress: {
-    label: 'Live Active',
-    bg: 'bg-purple-500/10',
-    text: 'text-purple-400',
-    border: 'border-purple-500/30',
+    label: 'Live',
+    bg: 'bg-brand/10',
+    text: 'text-brand',
+    border: 'border-brand/30',
     icon: <Radio className="w-3.5 h-3.5 animate-pulse" />,
   },
 };
@@ -135,7 +135,7 @@ export const MeetingHeader: React.FC<MeetingHeaderProps> = ({
     : '< 1 min';
 
   return (
-    <div className="p-6 rounded-2xl bg-[#111113] border border-[#27272A] space-y-4 shadow-xl">
+    <div className="p-6 rounded-xl bg-surface border border-line space-y-4 shadow-sm">
       {/* Top Row: Title + Status + Action Controls */}
       <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
         {/* Left Side: Title & Status */}
@@ -148,12 +148,12 @@ export const MeetingHeader: React.FC<MeetingHeaderProps> = ({
                   value={titleInput}
                   onChange={(e) => setTitleInput(e.target.value)}
                   autoFocus
-                  className="bg-[#18181b] border border-[#8B5CF6] rounded-xl px-3 py-1 text-base sm:text-lg font-bold text-white focus:outline-none"
+                  className="bg-surface border border-brand rounded-xl px-3 py-1 text-base sm:text-lg font-bold text-ink focus:outline-none"
                 />
                 <button
                   type="submit"
                   disabled={savingTitle}
-                  className="p-1.5 rounded-lg bg-emerald-500/20 text-emerald-400 hover:bg-emerald-500/30 transition-colors"
+                  className="p-1.5 rounded-lg bg-emerald-500/20 text-emerald-700 hover:bg-emerald-500/30 transition-colors"
                 >
                   <Check className="w-4 h-4" />
                 </button>
@@ -163,14 +163,14 @@ export const MeetingHeader: React.FC<MeetingHeaderProps> = ({
                     setTitleInput(meeting.title);
                     setIsEditingTitle(false);
                   }}
-                  className="p-1.5 rounded-lg bg-[#27272A] text-slate-400 hover:text-white transition-colors"
+                  className="p-1.5 rounded-lg bg-line text-muted hover:text-ink transition-colors"
                 >
                   <X className="w-4 h-4" />
                 </button>
               </form>
             ) : (
               <div className="flex items-center gap-2.5 max-w-full">
-                <h1 className="text-xl sm:text-2xl font-black text-white tracking-tight truncate">
+                <h1 className="text-xl sm:text-2xl font-semibold text-ink tracking-tight truncate">
                   {meeting.title}
                 </h1>
                 <button
@@ -180,7 +180,7 @@ export const MeetingHeader: React.FC<MeetingHeaderProps> = ({
                     setIsEditingTitle(true);
                   }}
                   title="Rename Meeting"
-                  className="p-1 rounded-lg text-slate-500 hover:text-slate-300 hover:bg-[#18181b] transition-colors cursor-pointer shrink-0"
+                  className="p-1 rounded-lg text-muted hover:text-ink hover:bg-surface transition-colors cursor-pointer shrink-0"
                 >
                   <Edit3 className="w-4 h-4" />
                 </button>
@@ -189,7 +189,7 @@ export const MeetingHeader: React.FC<MeetingHeaderProps> = ({
 
             {/* Semantic Status Badge */}
             <span
-              className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-mono font-bold border ${statusInfo.bg} ${statusInfo.text} ${statusInfo.border}`}
+              className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-sm font-mono font-bold border ${statusInfo.bg} ${statusInfo.text} ${statusInfo.border}`}
             >
               {statusInfo.icon}
               <span>{statusInfo.label.toUpperCase()}</span>
@@ -197,32 +197,32 @@ export const MeetingHeader: React.FC<MeetingHeaderProps> = ({
           </div>
 
           {/* Secondary Metadata Strip */}
-          <div className="flex items-center gap-3 text-xs text-slate-400 flex-wrap font-medium">
-            <span className="flex items-center gap-1 text-slate-300">
-              <Calendar className="w-3.5 h-3.5 text-[#8B5CF6]" />
+          <div className="flex items-center gap-3 text-sm text-muted flex-wrap font-medium">
+            <span className="flex items-center gap-1 text-ink">
+              <Calendar className="w-3.5 h-3.5 text-brand" />
               <span>{formattedDate}</span>
             </span>
             <span className="text-slate-600">•</span>
-            <span className="flex items-center gap-1 text-slate-300">
-              <Clock className="w-3.5 h-3.5 text-[#8B5CF6]" />
+            <span className="flex items-center gap-1 text-ink">
+              <Clock className="w-3.5 h-3.5 text-brand" />
               <span>{durationMin}</span>
             </span>
             <span className="text-slate-600">•</span>
-            <span className="flex items-center gap-1 text-slate-300">
-              <Users className="w-3.5 h-3.5 text-[#8B5CF6]" />
+            <span className="flex items-center gap-1 text-ink">
+              <Users className="w-3.5 h-3.5 text-brand" />
               <span>{speakerStats.displayLabel}</span>
             </span>
             <span className="text-slate-600">•</span>
-            <span className="flex items-center gap-1 text-slate-400">
+            <span className="flex items-center gap-1 text-muted">
               {meeting.source === 'live' ? (
                 <>
-                  <Radio className="w-3.5 h-3.5 text-purple-400" />
-                  <span>Google Meet Live Bot</span>
+                  <Radio className="w-3.5 h-3.5 text-brand" />
+                  <span>Live meeting assistant</span>
                 </>
               ) : (
                 <>
-                  <Volume2 className="w-3.5 h-3.5 text-emerald-400" />
-                  <span>Audio Ingestion</span>
+                  <Volume2 className="w-3.5 h-3.5 text-emerald-700" />
+                  <span>Uploaded recording</span>
                 </>
               )}
             </span>
@@ -236,7 +236,7 @@ export const MeetingHeader: React.FC<MeetingHeaderProps> = ({
             <select
               value={meeting.id}
               onChange={(e) => onSelectMeeting(e.target.value)}
-              className="bg-[#18181b] border border-[#27272A] rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-[#8B5CF6] cursor-pointer"
+              className="bg-surface border border-line rounded-xl px-3 py-2 text-sm text-ink focus:outline-none focus:border-brand cursor-pointer"
             >
               {allMeetings.map((m) => (
                 <option key={m.id} value={m.id}>
@@ -260,7 +260,7 @@ export const MeetingHeader: React.FC<MeetingHeaderProps> = ({
             disabled={!canManage}
             onClick={() => onDeleteMeeting(meeting.id, meeting.title)}
             title={`Delete ${meeting.title}`}
-            className="p-2 rounded-xl bg-[#18181b] hover:bg-rose-500/20 text-slate-400 hover:text-rose-400 border border-[#27272A] transition-colors cursor-pointer"
+            className="p-2 rounded-xl bg-surface hover:bg-rose-500/20 text-muted hover:text-rose-700 border border-line transition-colors cursor-pointer"
           >
             <Trash2 className="w-4 h-4" />
           </button>
