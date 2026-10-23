@@ -12,44 +12,44 @@ const SPEAKER_PALETTES: SpeakerColorTheme[] = [
   {
     bg: 'bg-violet-500/10',
     border: 'border-violet-500/30',
-    text: 'text-violet-300',
-    avatarBg: 'bg-gradient-to-tr from-violet-600 to-indigo-600',
-    badgeBg: 'bg-violet-500/20 text-violet-300 border-violet-500/30',
+    text: 'text-violet-700',
+    avatarBg: 'bg-violet-600',
+    badgeBg: 'bg-violet-500/20 text-violet-700 border-violet-500/30',
   },
   {
     bg: 'bg-cyan-500/10',
     border: 'border-cyan-500/30',
-    text: 'text-cyan-300',
-    avatarBg: 'bg-gradient-to-tr from-cyan-600 to-teal-600',
-    badgeBg: 'bg-cyan-500/20 text-cyan-300 border-cyan-500/30',
+    text: 'text-cyan-700',
+    avatarBg: 'bg-cyan-600',
+    badgeBg: 'bg-cyan-500/20 text-cyan-700 border-cyan-500/30',
   },
   {
     bg: 'bg-amber-500/10',
     border: 'border-amber-500/30',
-    text: 'text-amber-300',
-    avatarBg: 'bg-gradient-to-tr from-amber-600 to-orange-600',
-    badgeBg: 'bg-amber-500/20 text-amber-300 border-amber-500/30',
+    text: 'text-amber-700',
+    avatarBg: 'bg-amber-600',
+    badgeBg: 'bg-amber-500/20 text-amber-700 border-amber-500/30',
   },
   {
     bg: 'bg-emerald-500/10',
     border: 'border-emerald-500/30',
-    text: 'text-emerald-300',
-    avatarBg: 'bg-gradient-to-tr from-emerald-600 to-teal-700',
-    badgeBg: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30',
+    text: 'text-emerald-700',
+    avatarBg: 'bg-emerald-600',
+    badgeBg: 'bg-emerald-500/20 text-emerald-700 border-emerald-500/30',
   },
   {
     bg: 'bg-rose-500/10',
     border: 'border-rose-500/30',
-    text: 'text-rose-300',
-    avatarBg: 'bg-gradient-to-tr from-rose-600 to-pink-600',
-    badgeBg: 'bg-rose-500/20 text-rose-300 border-rose-500/30',
+    text: 'text-rose-700',
+    avatarBg: 'bg-rose-600',
+    badgeBg: 'bg-rose-500/20 text-rose-700 border-rose-500/30',
   },
   {
     bg: 'bg-blue-500/10',
     border: 'border-blue-500/30',
-    text: 'text-blue-300',
-    avatarBg: 'bg-gradient-to-tr from-blue-600 to-sky-600',
-    badgeBg: 'bg-blue-500/20 text-blue-300 border-blue-500/30',
+    text: 'text-blue-700',
+    avatarBg: 'bg-blue-600',
+    badgeBg: 'bg-blue-500/20 text-blue-700 border-blue-500/30',
   },
 ];
 
@@ -143,7 +143,7 @@ export function getMeetingSpeakerStats(
   let displayLabel = '';
   if (detectedCount > 0) {
     if (participantCount > 0 && participantCount !== detectedCount) {
-      displayLabel = `${participantCount} participants · ${detectedCount} detected speakers`;
+      displayLabel = `${participantCount} participants \u00b7 ${detectedCount} detected speakers`;
     } else {
       displayLabel = detectedCount === 1 ? '1 speaker detected' : `${detectedCount} speakers detected`;
     }
