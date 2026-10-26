@@ -17,6 +17,7 @@ from app.models.task import Task
 from app.models.transcript import TranscriptSegment
 from app.services.embedding_provider import embed_text
 from app.services.transcript_utils import format_timestamp
+from app.services.access_control import task_visibility
 
 logger = logging.getLogger(__name__)
 
@@ -29,9 +30,10 @@ class Evidence:
 
 
 class KnowledgeRetriever:
-    def __init__(self, db: Session, workspace_id: uuid.UUID):
+    def __init__(self, db: Session, workspace_id: uuid.UUID, user_id: uuid.UUID | None = None):
         self.db = db
         self.workspace_id = workspace_id
+        self.user_id = user_id
 
     def retrieve(self, question: str, meeting_id: uuid.UUID | None = None) -> list[Evidence]:
         top_k = APP_CONFIG.rag.top_k
@@ -52,7 +54,7 @@ class KnowledgeRetriever:
                         .filter(DocumentChunk.workspace_id == self.workspace_id,
                                 KnowledgeDocument.workspace_id == self.workspace_id,
                                 DocumentChunk.embedding.is_not(None),
-                                DocumentChunk.embedding_model == APP_CONFIG.embeddings.model,
+                                DocumentChunk.embedding_model == APP_CONFIG.embeddings.index_key,
                                 distance <= APP_CONFIG.rag.similarity_threshold)
                         .order_by(distance).limit(top_k).all()
                     )
@@ -68,7 +70,7 @@ class KnowledgeRetriever:
                     .join(Meeting, Meeting.id == TranscriptSegment.meeting_id)
                     .filter(Meeting.workspace_id == self.workspace_id,
                             TranscriptSegment.embedding.is_not(None),
-                            TranscriptSegment.embedding_model == APP_CONFIG.embeddings.model,
+                            TranscriptSegment.embedding_model == APP_CONFIG.embeddings.index_key,
                             distance <= APP_CONFIG.rag.similarity_threshold)
                 )
                 if meeting_id:
@@ -110,6 +112,7 @@ class KnowledgeRetriever:
                     self.db.query(Task, Meeting.title)
                     .join(Meeting, Meeting.id == Task.meeting_id)
                     .filter(Meeting.workspace_id == self.workspace_id,
+                            task_visibility(self.user_id) if self.user_id else False,
                             or_(*(Task.title.ilike(f"%{word}%") for word in words)))
                     .limit(top_k).all()
                 )
