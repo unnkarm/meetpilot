@@ -226,7 +226,7 @@ def process_and_index_document(
                 text=c_data["text"],
                 language_code=detect_text_language(c_data["text"]).code,
                 embedding=emb,
-                embedding_model=APP_CONFIG.embeddings.model,
+                embedding_model=APP_CONFIG.embeddings.index_key,
             )
             chunk_objects.append(chunk_obj)
 
