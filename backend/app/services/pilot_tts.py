@@ -15,6 +15,7 @@ from functools import lru_cache
 from pathlib import Path
 
 from app.core.app_config import APP_CONFIG
+from app.services.pilot_language import reply_language, script_languages, native_script
 
 logger = logging.getLogger(__name__)
 _VOICE_LOCK = threading.Lock()
@@ -47,12 +48,45 @@ def parse_voice_token(token: str) -> str:
     # together. Old UUID-only clients and the diagnostic smoke test use default.
     if token.startswith("mp/"):
         parts = token.split("/")
-        if len(parts) != 3 or parts[1] not in VOICE_MODELS or not re.fullmatch(r"[a-f0-9]{32}", parts[2]):
+        if (len(parts) not in {3, 4} or parts[1] not in VOICE_MODELS
+                or not re.fullmatch(r"[a-f0-9]{32}", parts[2])
+                or (len(parts) == 4 and parts[3] not in {"en", "hi", "bn"})):
             raise ValueError("Invalid voice token")
         return parts[1]
     if token in VOICE_MODELS:
         return token
     return "lessac"
+
+
+def parse_voice_language(token: str) -> str | None:
+    parse_voice_token(token)
+    parts = token.split("/")
+    return parts[3] if token.startswith("mp/") and len(parts) == 4 else None
+
+
+def speech_spans(text: str, language: str | None):
+    """Switch native voices at script boundaries without translating the text.
+
+    English technical terms stay with the surrounding native phrase. If a
+    response quotes both Bengali and Hindi, neither is read by an English voice.
+    """
+    native = script_languages(text) & {"bn", "hi"}
+    if len(native) < 2:
+        code = next(iter(native)) if native else language or reply_language(text)
+        if code == "hi" and language in {"mr", "ne"}:
+            code = language
+        yield text, code
+        return
+    current = language if language in native else reply_language(text)
+    start = 0
+    for index, char in enumerate(text):
+        code = native_script(char)
+        if code and code != current:
+            if text[start:index].strip():
+                yield text[start:index], current
+            current, start = code, index
+    if text[start:].strip():
+        yield text[start:], current
 
 
 def _wav(pcm: bytes, sample_rate: int) -> bytes:
@@ -86,7 +120,7 @@ def _sentences(text: str) -> list[str]:
     content = " ".join(text.strip().split())[:3000]
     if not content:
         raise ValueError("TTS text is empty")
-    return [chunk for part in re.split(r"(?<=[.!?])\s+", content) if part
+    return [chunk for part in re.split(r"(?<=[.!?।])\s+", content) if part
             for chunk in textwrap.wrap(part, width=240, break_long_words=True,
                                        break_on_hyphens=False)]
 
@@ -156,15 +190,16 @@ def _piper_sentence(model_path: str, sentence: str, sample_rate: int) -> bytes:
 
 
 class PiperTTS(TTSProvider):
-    def __init__(self, model_path: str | Path | None = None):
+    def __init__(self, model_path: str | Path | None = None, supported_language: str = "en"):
         self.model_path = Path(model_path or os.getenv("PILOT_PIPER_VOICE_PATH", str(_DEFAULT_VOICE)))
+        self.supported_language = supported_language
 
     async def synthesize_chunks(self, text: str, language: str | None = None,
                                 sample_rate: int = 24000) -> AsyncIterator[bytes]:
         if sample_rate not in (16000, 24000):
             raise ValueError("TTS sample rate must be 16000 or 24000")
-        if language and language.split("-")[0].lower() != "en":
-            raise RuntimeError(f"Bundled Piper voice does not support language {language}")
+        if language and language.split("-")[0].lower() != self.supported_language:
+            raise RuntimeError(f"Selected Piper voice does not support language {language}")
         if not self.model_path.is_file() or not self.model_path.with_suffix(".onnx.json").is_file():
             raise RuntimeError(f"Local Piper voice is missing: {self.model_path}")
         for sentence in _sentences(text):
@@ -193,12 +228,30 @@ class FallbackTTS(TTSProvider):
             yield chunk
 
 
+class LanguageRoutedTTS(TTSProvider):
+    def __init__(self, english: TTSProvider):
+        self.english = english
+
+    async def synthesize_chunks(self, text: str, language: str | None = None,
+                                sample_rate: int = 24000) -> AsyncIterator[bytes]:
+        for span, code in speech_spans(text, language):
+            provider = self.english
+            if code != "en":
+                path = os.getenv(f"PILOT_PIPER_{code.upper()}_VOICE_PATH", "") if code in {"bn", "hi"} else ""
+                # Native neural voices are optional local assets. English Piper
+                # must never read Bengali/Hindi as if they were English.
+                provider = (FallbackTTS(PiperTTS(path, supported_language=code), EspeakNGTTS())
+                            if path else EspeakNGTTS())
+            async for chunk in provider.synthesize_chunks(span, code, sample_rate):
+                yield chunk
+
+
 def get_tts_provider(voice_id: str = "lessac") -> TTSProvider:
     provider = APP_CONFIG.pilot.tts_provider
     if provider == "piper":
-        return FallbackTTS(PiperTTS(voice_path(voice_id)), EspeakNGTTS())
+        return LanguageRoutedTTS(FallbackTTS(PiperTTS(voice_path(voice_id)), EspeakNGTTS()))
     if provider == "espeak_ng":
-        return EspeakNGTTS()
+        return LanguageRoutedTTS(EspeakNGTTS())
     raise RuntimeError("Unsupported Pilot TTS provider")
 
 
