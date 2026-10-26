@@ -4,6 +4,7 @@ import audioop
 import io
 import wave
 import threading
+import uuid
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from functools import lru_cache
@@ -40,6 +41,8 @@ class LocalWhisperSTT(StreamingSTTProvider):
     def _transcribe(self, pcm: bytes, language_hint: str | None = None) -> tuple[str, str | None]:
         from app.services.meeting_language import recognition_hint
         language = recognition_hint(language_hint)
+        if APP_CONFIG.transcription.model.endswith(".en") and APP_CONFIG.language.multilingual_transcription:
+            raise RuntimeError("English-only Whisper checkpoint cannot recognize mixed-language speech")
         if self.model is None:
             from faster_whisper import WhisperModel
             self.model = WhisperModel(APP_CONFIG.transcription.model, device="cpu", compute_type="int8",
@@ -51,7 +54,10 @@ class LocalWhisperSTT(StreamingSTTProvider):
                 wav.setframerate(APP_CONFIG.pilot.audio_sample_rate)
                 wav.writeframes(pcm)
             output.seek(0)
-            segments, info = self.model.transcribe(output, beam_size=1, vad_filter=False, language=language, task="transcribe")
+            segments, info = self.model.transcribe(
+                output, beam_size=1, vad_filter=False, language=language, task="transcribe",
+                multilingual=APP_CONFIG.language.multilingual_transcription, condition_on_previous_text=False,
+            )
             return " ".join(segment.text.strip() for segment in segments).strip(), info.language
 
 
@@ -74,6 +80,9 @@ class StreamingSpeechBuffer:
         self.silence_ms = 0
         self.last_partial_ms = 0
         self.last_partial = ""
+        self.pre_roll = bytearray()
+        self.utterance_id = None
+        self.pre_roll_length = 0
 
     def reset(self):
         self.frames.clear()
@@ -81,6 +90,9 @@ class StreamingSpeechBuffer:
         self.silence_ms = 0
         self.last_partial_ms = 0
         self.last_partial = ""
+        self.pre_roll.clear()
+        self.utterance_id = None
+        self.pre_roll_length = 0
 
     def feed(self, pcm: bytes, *, assistant_originated: bool = False,
              assistant_speaking: bool = False) -> list[SpeechEvent]:
@@ -95,22 +107,33 @@ class StreamingSpeechBuffer:
         events = []
         if voiced and not self.speaking:
             self.speaking = True
+            self.utterance_id = str(uuid.uuid4())
+            # Keep quiet leading consonants that preceded the energy threshold.
+            self.frames.extend(self.pre_roll)
+            self.pre_roll_length = len(self.pre_roll)
+            self.pre_roll.clear()
             if assistant_speaking:
-                events.append(SpeechEvent("pilot_interrupted"))
-            events.append(SpeechEvent("speech_started"))
+                events.append(SpeechEvent("pilot_interrupted", utterance_id=self.utterance_id))
+            events.append(SpeechEvent("speech_started", utterance_id=self.utterance_id))
         if not self.speaking:
+            self.pre_roll.extend(pcm)
+            limit = APP_CONFIG.pilot.audio_sample_rate * 2 * APP_CONFIG.pilot.pre_roll_ms // 1000
+            if len(self.pre_roll) > limit:
+                del self.pre_roll[:len(self.pre_roll) - limit]
             return events
         self.frames.extend(pcm)
         self.silence_ms = 0 if voiced else self.silence_ms + duration_ms
         elapsed_ms = len(self.frames) * 1000 // (APP_CONFIG.pilot.audio_sample_rate * 2)
         if self.silence_ms >= APP_CONFIG.pilot.silence_end_ms or elapsed_ms >= APP_CONFIG.pilot.max_utterance_ms:
             return events + self.flush()
-        if elapsed_ms - self.last_partial_ms >= APP_CONFIG.pilot.partial_interval_ms and voiced:
-            self.last_partial_ms = elapsed_ms
+        speech_ms = (len(self.frames) - self.pre_roll_length) * 1000 // (APP_CONFIG.pilot.audio_sample_rate * 2)
+        interval = APP_CONFIG.pilot.first_partial_ms if not self.last_partial_ms else APP_CONFIG.pilot.partial_interval_ms
+        if speech_ms - self.last_partial_ms >= interval and voiced:
+            self.last_partial_ms = speech_ms
             text, language = self.transcriber.transcribe(bytes(self.frames))
             if text and text != self.last_partial:
                 self.last_partial = text
-                events.append(SpeechEvent("partial_transcript", text, language))
+                events.append(SpeechEvent("partial_transcript", text, language, utterance_id=self.utterance_id))
         return events
 
     def flush(self) -> list[SpeechEvent]:
@@ -118,16 +141,17 @@ class StreamingSpeechBuffer:
             return []
         pcm = bytes(self.frames)
         duration = len(pcm) / (APP_CONFIG.pilot.audio_sample_rate * 2)
+        utterance_id = self.utterance_id
         self.reset()
         text, language = self.transcriber.transcribe(pcm)
         turns = get_diarization_provider().diarize(duration)
         speaker = turns[0].speaker_id if turns else None
         confidence = turns[0].confidence if turns else None
-        events = [SpeechEvent("speech_ended")]
+        events = [SpeechEvent("speech_ended", utterance_id=utterance_id)]
         if language:
-            events.append(SpeechEvent("language_detected", language=language))
+            events.append(SpeechEvent("language_detected", language=language, utterance_id=utterance_id))
         if text:
-            events.append(SpeechEvent("final_transcript", text, language, speaker, confidence))
+            events.append(SpeechEvent("final_transcript", text, language, speaker, confidence, utterance_id))
         return events
 
 
