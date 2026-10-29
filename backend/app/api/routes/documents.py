@@ -24,6 +24,7 @@ from app.services.document_service import (
 )
 from app.services.knowledge_chat_service import answer_workspace_knowledge
 from app.services.product_events import track_event
+from app.services.access_control import require_manager
 
 logger = logging.getLogger(__name__)
 
@@ -53,7 +54,7 @@ def upload_document(
     db: Session = Depends(get_db),
 ):
     """Uploads a company knowledge document (PDF, DOCX, TXT, MD), extracts text, generates embeddings, and indexes into pgvector."""
-    _verify_workspace_membership(workspace_id, current_user, db)
+    require_manager(db, workspace_id, current_user.id)
     workspace = db.get(Workspace, workspace_id)
     if workspace and workspace.is_demo:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Upload real documents to a non-demo workspace")
@@ -134,7 +135,7 @@ def delete_document(
     if not doc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found.")
 
-    _verify_workspace_membership(doc.workspace_id, current_user, db)
+    require_manager(db, doc.workspace_id, current_user.id)
 
     db.delete(doc)
     db.commit()
@@ -150,7 +151,7 @@ def chat_with_workspace_knowledge(
     """Grounded multi-source RAG across company documents and meeting transcripts in the active workspace."""
     _verify_workspace_membership(payload.workspace_id, current_user, db)
 
-    answer, citations_data = answer_workspace_knowledge(db, payload.workspace_id, payload.question)
+    answer, citations_data = answer_workspace_knowledge(db, payload.workspace_id, payload.question, user_id=current_user.id)
     if not db.get(Workspace, payload.workspace_id).is_demo:
         track_event(db, "first_ai_question", current_user.id, payload.workspace_id, once=True)
         if len({citation["type"] for citation in citations_data}) > 1:

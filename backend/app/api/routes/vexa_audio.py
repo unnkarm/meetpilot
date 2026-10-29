@@ -14,6 +14,9 @@ from app.core.app_config import APP_CONFIG
 from app.core.config import settings
 from app.services.pilot_streaming_stt import LocalWhisperSTT
 from app.services.pilot_tts import get_tts_provider, parse_voice_token, synthesize_wake_ack
+from app.services.pilot_tts import parse_voice_language
+from app.services.meeting_language import recognition_hint
+from app.services.pilot_language import script_languages, reply_language
 
 router = APIRouter(prefix="/internal/vexa", include_in_schema=False)
 _inference_slots = asyncio.Semaphore(2)
@@ -32,6 +35,10 @@ def transcriber():
 
 def transcribe_wav(raw: bytes, language: str | None) -> dict:
     try:
+        language = recognition_hint(language)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    try:
         with wave.open(io.BytesIO(raw), "rb") as wav:
             if (wav.getnchannels(), wav.getsampwidth(), wav.getframerate()) != (1, 2, 16000):
                 raise ValueError("Expected PCM16 mono WAV at 16000Hz")
@@ -41,13 +48,17 @@ def transcribe_wav(raw: bytes, language: str | None) -> dict:
     except (wave.Error, EOFError, ValueError) as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     with _model_lock:
+        if APP_CONFIG.transcription.model.endswith(".en") and APP_CONFIG.language.multilingual_transcription:
+            raise RuntimeError("English-only Whisper checkpoint cannot recognize mixed-language speech")
         provider = transcriber()
         if provider.model is None:
             from faster_whisper import WhisperModel
             provider.model = WhisperModel(APP_CONFIG.transcription.model, device="cpu", compute_type="int8",
                                           local_files_only=True)
         segments, info = provider.model.transcribe(io.BytesIO(raw), language=language, beam_size=1,
-                                                   word_timestamps=True, vad_filter=True)
+                                                   word_timestamps=True, vad_filter=True, task="transcribe",
+                                                   multilingual=APP_CONFIG.language.multilingual_transcription,
+                                                   condition_on_previous_text=False)
         rows = []
         words = []
         for segment in segments:
@@ -58,7 +69,8 @@ def transcribe_wav(raw: bytes, language: str | None) -> dict:
                          "text": segment.text, "avg_logprob": segment.avg_logprob,
                          "no_speech_prob": segment.no_speech_prob, "compression_ratio": segment.compression_ratio,
                          "words": row_words})
-        return {"text": " ".join(row["text"].strip() for row in rows), "language": info.language,
+        text = " ".join(row["text"].strip() for row in rows)
+        return {"text": text, "language": info.language, "is_multilingual": len(script_languages(text)) > 1,
                 "duration": duration, "segments": rows, "words": words}
 
 
@@ -91,6 +103,7 @@ async def audio_speech(payload: SpeechRequest, x_api_key: str | None = Header(No
         raise HTTPException(status_code=422, detail="Vexa virtual microphone expects pcm")
     try:
         voice_id = parse_voice_token(payload.voice)
+        language = parse_voice_language(payload.voice) or reply_language(payload.input)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
@@ -100,7 +113,7 @@ async def audio_speech(payload: SpeechRequest, x_api_key: str | None = Header(No
             with wave.open(io.BytesIO(raw), "rb") as wav:
                 yield wav.readframes(wav.getnframes())
             return
-        async for raw in get_tts_provider(voice_id).synthesize_chunks(payload.input, sample_rate=24000):
+        async for raw in get_tts_provider(voice_id).synthesize_chunks(payload.input, language, sample_rate=24000):
             with wave.open(io.BytesIO(raw), "rb") as wav:
                 yield wav.readframes(wav.getnframes())
     return StreamingResponse(stream(), media_type="application/octet-stream",

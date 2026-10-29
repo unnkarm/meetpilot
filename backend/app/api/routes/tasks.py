@@ -14,23 +14,28 @@ from app.schemas.meeting import TaskOut
 from app.schemas.task import TaskCreateRequest, TaskUpdateRequest
 from app.services.product_events import track_event
 from app.models.task import TaskStatus
+from app.services.access_control import require_manager, task_visibility, require_task_update
 
 router = APIRouter(prefix="/api/v1/tasks", tags=["tasks"])
 
 
-def _resolve_assignee(db: Session, workspace_id: uuid.UUID, name: str | None) -> User | None:
+def _resolve_assignee(db: Session, workspace_id: uuid.UUID, name: str | None, user_id: uuid.UUID | None = None) -> User | None:
+    if user_id:
+        if db.get(WorkspaceMember, (workspace_id, user_id)) is None:
+            raise HTTPException(status_code=422, detail="Assignee must be a member of this workspace")
+        return db.get(User, user_id)
     if not name or not name.strip():
         return None
-    member = (
+    members = (
         db.query(User)
         .join(WorkspaceMember, WorkspaceMember.user_id == User.id)
         .filter(WorkspaceMember.workspace_id == workspace_id, func.lower(User.name) == name.strip().lower())
-        .first()
+        .all()
     )
-    if member is None:
+    if len(members) != 1:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                            detail="Assignee must be a member of this workspace")
-    return member
+                            detail="Assignee name must uniquely match a workspace member")
+    return members[0]
 
 
 @router.get("", response_model=list[TaskOut])
@@ -46,7 +51,7 @@ def list_workspace_tasks(
     return (
         db.query(Task)
         .join(Meeting, Meeting.id == Task.meeting_id)
-        .filter(Meeting.workspace_id == workspace_id)
+        .filter(Meeting.workspace_id == workspace_id, task_visibility(current_user.id))
         .order_by(Task.created_at.desc())
         .all()
     )
@@ -67,7 +72,9 @@ def create_task(
     target_meeting = None
     if payload.meeting_id:
         target_meeting = get_meeting_for_member(payload.meeting_id, current_user, db)
+        require_manager(db, target_meeting.workspace_id, current_user.id)
     elif payload.workspace_id:
+        require_manager(db, payload.workspace_id, current_user.id)
         membership = db.get(WorkspaceMember, (payload.workspace_id, current_user.id))
         if membership is None:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not a member of this workspace")
@@ -88,7 +95,7 @@ def create_task(
             db.add(target_meeting)
             db.flush()
 
-    assignee = _resolve_assignee(db, target_meeting.workspace_id, payload.assignee_name)
+    assignee = _resolve_assignee(db, target_meeting.workspace_id, payload.assignee_name, payload.assignee_id)
     task = Task(
         meeting_id=target_meeting.id,
         title=payload.title,
@@ -128,13 +135,14 @@ def update_task(
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not a member of this task's workspace")
 
     update_data = payload.model_dump(exclude_unset=True)
+    require_task_update(db, task, current_user.id, set(update_data))
     was_done = task.status == TaskStatus.done
     if any(update_data.get(field) is None for field in ("title", "priority", "status") if field in update_data):
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Title, priority and status cannot be null")
     if "title" in update_data and not update_data["title"].strip():
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Task title cannot be blank")
-    if "assignee_name" in update_data:
-        assignee = _resolve_assignee(db, task.meeting.workspace_id, update_data["assignee_name"])
+    if "assignee_name" in update_data or "assignee_id" in update_data:
+        assignee = _resolve_assignee(db, task.meeting.workspace_id, update_data.get("assignee_name"), update_data.pop("assignee_id", None))
         task.assignee_id = assignee.id if assignee else None
         update_data["assignee_name"] = assignee.name if assignee else None
     for field, value in update_data.items():
@@ -170,6 +178,7 @@ def delete_task(
     if membership is None:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not a member of this task's workspace")
 
+    require_manager(db, task.meeting.workspace_id, current_user.id)
     db.delete(task)
     db.commit()
 
