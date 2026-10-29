@@ -18,6 +18,7 @@ from app.models.user import User
 from app.services.embedding_provider import embed_text
 from app.core.app_config import APP_CONFIG
 from app.services.transcript_utils import format_timestamp
+from app.services.access_control import task_visibility
 
 logger = logging.getLogger(__name__)
 
@@ -93,7 +94,7 @@ def search(
                     .filter(
                         Meeting.workspace_id.in_(workspace_ids),
                         TranscriptSegment.embedding.is_not(None),
-                        TranscriptSegment.embedding_model == APP_CONFIG.embeddings.model,
+                        TranscriptSegment.embedding_model == APP_CONFIG.embeddings.index_key,
                     )
                     .order_by(TranscriptSegment.embedding.cosine_distance(query_embedding).asc())
                     .limit(MAX_VECTOR_RESULTS)
@@ -175,7 +176,7 @@ def search(
                     .filter(
                         DocumentChunk.workspace_id.in_(workspace_ids),
                         DocumentChunk.embedding.is_not(None),
-                        DocumentChunk.embedding_model == APP_CONFIG.embeddings.model,
+                        DocumentChunk.embedding_model == APP_CONFIG.embeddings.index_key,
                     )
                     .order_by(DocumentChunk.embedding.cosine_distance(query_embedding).asc())
                     .limit(MAX_VECTOR_RESULTS)
@@ -249,7 +250,7 @@ def search(
         task_rows = (
             db.query(Task, Meeting.title, Meeting.created_at)
             .join(Meeting, Meeting.id == Task.meeting_id)
-            .filter(Meeting.workspace_id.in_(workspace_ids), Task.title.ilike(like_pattern))
+            .filter(Meeting.workspace_id.in_(workspace_ids), Task.title.ilike(like_pattern), task_visibility(current_user.id))
             .limit(MAX_KEYWORD_RESULTS)
             .all()
         )

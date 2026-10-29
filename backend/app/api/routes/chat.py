@@ -10,6 +10,7 @@ from app.models.user import User
 from app.schemas.chat import ChatMessageOut, ChatRequest, ChatResponse
 from app.services.chat_service import answer_question
 from app.services.product_events import track_event
+from app.services.access_control import membership_for, is_manager
 
 router = APIRouter(prefix="/api/v1/meetings", tags=["chat"])
 
@@ -33,7 +34,7 @@ def chat_with_meeting(
     db.add(
         ChatMessage(
             meeting_id=meeting_id,
-            user_id=None,
+            user_id=current_user.id,
             role=ChatRole.assistant,
             content=answer,
             cited_timestamp=cited_timestamp,
@@ -51,4 +52,8 @@ def get_chat_history(
     db: Session = Depends(get_db),
 ) -> list[ChatMessage]:
     meeting = get_meeting_for_member(meeting_id, current_user, db)
-    return meeting.chat_messages
+    member = membership_for(db, meeting.workspace_id, current_user.id)
+    query = db.query(ChatMessage).filter(ChatMessage.meeting_id == meeting.id)
+    if not is_manager(member):
+        query = query.filter(ChatMessage.user_id == current_user.id)
+    return query.order_by(ChatMessage.created_at).all()
