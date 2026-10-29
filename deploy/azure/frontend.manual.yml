@@ -1,0 +1,65 @@
+# Template: copy to .github/workflows/azure-frontend.yml when ready to deploy.
+# This file does not run from deploy/azure. It creates no Azure resources.
+name: Deploy MeetPilot frontend to Azure
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: azure-meetpilot-frontend
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      VITE_API_BASE_URL: ${{ vars.VITE_API_BASE_URL }}
+      VITE_CLERK_PUBLISHABLE_KEY: ${{ vars.VITE_CLERK_PUBLISHABLE_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Check public build configuration
+        shell: bash
+        run: |
+          node --input-type=module <<'NODE'
+          const origin = process.env.VITE_API_BASE_URL || '';
+          let url;
+          try { url = new URL(origin); } catch { throw new Error('Set VITE_API_BASE_URL to an absolute HTTPS origin.'); }
+          if (url.protocol !== 'https:' || origin !== url.origin ||
+              /^(localhost|127\.0\.0\.1|\[::1\])$/.test(url.hostname) ||
+              url.hostname.endsWith('.localhost') || url.hostname.endsWith('.invalid')) {
+            throw new Error('VITE_API_BASE_URL must be a hosted HTTPS origin with no path or trailing slash.');
+          }
+          if (!/^pk_(test|live)_[A-Za-z0-9+/=_-]+$/.test(process.env.VITE_CLERK_PUBLISHABLE_KEY || '')) {
+            throw new Error('Set a real Clerk publishable key in VITE_CLERK_PUBLISHABLE_KEY.');
+          }
+          NODE
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci --no-audit --no-fund
+      - name: Check frontend types
+        working-directory: frontend
+        run: npm run lint
+      - name: Build frontend
+        working-directory: frontend
+        run: npm run build
+      - name: Deploy built assets
+        uses: Azure/static-web-apps-deploy@v1
+        with:
+          azure_static_web_apps_api_token: ${{ secrets.AZURE_STATIC_WEB_APPS_API_TOKEN }}
+          action: upload
+          app_location: frontend/dist
+          api_location: ''
+          output_location: ''
+          skip_app_build: true
+          skip_api_build: true
+          production_branch: ${{ github.event.repository.default_branch }}
