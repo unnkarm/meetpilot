@@ -1,4 +1,5 @@
 import logging
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -6,7 +7,10 @@ from fastapi.middleware.cors import CORSMiddleware
 import app.models  # noqa: F401  (registers all models on Base.metadata)
 from app.api.routes import auth, chat, documents, integrations, live_insights, live_meetings, meetings, pilot_phase1, pilot_voice, search, tasks, users, workspaces
 from app.core.config import settings
-from app.api.routes import vexa_audio
+from app.api.routes import vexa_audio, pilot_settings
+from app.api.routes import meeting_review
+from app.api.routes import legal
+from app.services.pilot_tts import available_voices, synthesize_wake_ack
 
 
 from starlette.requests import Request
@@ -14,7 +18,18 @@ from starlette.responses import JSONResponse
 
 logging.basicConfig(level=logging.INFO)
 
-app = FastAPI(title="MeetPilot AI API", version="0.1.0")
+@asynccontextmanager
+async def lifespan(app):
+    for voice in available_voices():
+        if voice["available"]:
+            try:
+                await synthesize_wake_ack(voice["id"])
+            except Exception:
+                logging.exception("Could not warm local wake acknowledgement")
+    yield
+
+
+app = FastAPI(title="MeetPilot AI API", version="0.1.0", lifespan=lifespan)
 
 # Comprehensive CORS origins for local development and production
 origins = [
@@ -55,6 +70,7 @@ async def global_exception_handler(request: Request, exc: Exception):
     return response
 
 app.include_router(auth.router)
+app.include_router(legal.router)
 app.include_router(users.router)
 app.include_router(workspaces.router)
 app.include_router(meetings.router)
@@ -68,6 +84,8 @@ app.include_router(integrations.router)
 app.include_router(pilot_phase1.router)
 app.include_router(pilot_voice.router)
 app.include_router(vexa_audio.router)
+app.include_router(pilot_settings.router)
+app.include_router(meeting_review.router)
 
 
 
