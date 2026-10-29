@@ -3,6 +3,7 @@
 import asyncio
 import json
 import logging
+import re
 import uuid
 import redis
 
@@ -15,6 +16,7 @@ from app.core.config import settings
 from app.core.security import verify_clerk_token
 from app.database.session import SessionLocal, get_db
 from app.models.user import User
+from app.models.meeting import MeetingStatus
 from app.models.workspace import Workspace
 from app.services.pilot_audio import WebSocketAudioProvider
 from app.services.vexa_audio_provider import VexaMeetingAudioProvider
@@ -24,9 +26,41 @@ from app.services.pilot_session import PilotSessionStore, PilotState, public_ses
 from app.services.pilot_streaming_stt import SpeechEvent, StreamingSpeechBuffer, get_stt_provider, MeetingLanguageSTT
 from app.services.pilot_tts import get_tts_provider, synthesize_wake_ack
 from app.services.pilot_wakeword import get_wakeword_provider, WakeGate
+from app.services.pilot_language import is_addressed_followup, reply_language, localized_message
 
 router = APIRouter(prefix="/api/v1/meetings", tags=["pilot"])
 logger = logging.getLogger(__name__)
+
+
+def _live_bot_audio_available(meeting) -> bool:
+    return meeting.source == "live" and meeting.status == MeetingStatus.in_progress
+
+
+def _query_key(text: str) -> str:
+    """Compare repeat utterances while a reply is still being generated."""
+    return " ".join(re.findall(r"\w+", text.casefold(), re.UNICODE))
+
+
+def _followup_is_addressed(text: str, source: str) -> bool:
+    if source == "microphone":
+        return bool(text.strip())
+    # A call contains ordinary conversation. A recognized participant can ask
+    # follow-up questions without another wake, but a nearby statement should
+    # not turn the assistant into a meeting participant without being asked.
+    return is_addressed_followup(text) or bool(re.search(
+        r"^(?:and\s+|but\s+|so\s+)?(?:what|why|when|where|who|which|how|can\s+you|"
+        r"could\s+you|would\s+you|do\s+you|did\s+we|are\s+there|is\s+there|tell\s+me|"
+        r"give\s+me|summari[sz]e|explain|repeat|say\s+that|make\s+(?:it|that)|"
+        r"go\s+on|continue|more\s+detail|shorter|yes\b|no\b)", text.strip(), re.I))
+
+
+def _history_for_turn(session, source: str, speaker: str | None) -> list[dict]:
+    key = "microphone" if source == "microphone" else WakeGate.normalize_speaker(speaker)
+    if key is None or session.dialogue_speaker != key:
+        return []
+    return [{"role": turn["role"], "content": turn["content"][:2000]}
+            for turn in session.conversation_history[-6:]
+            if turn.get("role") in {"user", "assistant"} and isinstance(turn.get("content"), str)]
 
 
 def _session_for_member(meeting_id: uuid.UUID, session_id: str, user: User, db: Session):
@@ -68,8 +102,8 @@ async def _play_text(websocket, meeting, text, playback_ack, ack_state, *, wake_
             workspace = voice_db.get(Workspace, meeting.workspace_id)
             return workspace.pilot_voice_id if workspace else "lessac"
     voice_id = await asyncio.to_thread(selected_voice)
-    if meeting.source == "live":
-        await VexaMeetingAudioProvider(meeting.id, meeting.workspace_id).speak_text(text, voice_id)
+    if _live_bot_audio_available(meeting):
+        await VexaMeetingAudioProvider(meeting.id, meeting.workspace_id).speak_text(text, voice_id, language=language)
         return
     async def chunks():
         if wake_ack:
@@ -81,10 +115,13 @@ async def _play_text(websocket, meeting, text, playback_ack, ack_state, *, wake_
     async for wav in chunks():
         interaction_id = uuid.uuid4().hex
         ack_state["expected"] = interaction_id
+        ack_state["error"] = None
         playback_ack.clear()
         await provider.speak(wav, interaction_id=interaction_id)
         await asyncio.wait_for(playback_ack.wait(), timeout=45)
         ack_state["expected"] = None
+        if ack_state.get("error"):
+            raise RuntimeError(ack_state["error"])
 
 
 async def _acknowledge_wake(websocket, meeting, playback_ack, ack_state):
@@ -101,30 +138,32 @@ async def _acknowledge_wake(websocket, meeting, playback_ack, ack_state):
 
 async def _handle_final(websocket: WebSocket, db: Session, meeting, user, session, store,
                         text: str, language: str | None, playback_ack: asyncio.Event,
-                        ack_state: dict, *, allow_actions: bool = True, wake_ack_task=None) -> None:
+                        ack_state: dict, *, allow_actions: bool = True, wake_ack_task=None,
+                        captured_query: bool = False, conversation_history=None,
+                        dialogue_speaker=None) -> bool:
     if session.state in {PilotState.SPEAKING, PilotState.PROCESSING, PilotState.IDLE}:
-        return
+        return False
     wake = get_wakeword_provider()
     trace = PilotTrace(meeting.id, meeting.workspace_id)
     with trace.stage("wake_detection"):
-        if session.state == PilotState.CAPTURING_QUERY:
+        if captured_query:
+            query = text.strip()
+        elif session.state == PilotState.CAPTURING_QUERY:
             detected = wake.detect(text)
             query = detected if detected is not None else text.strip()
         else:
             query = wake.detect(text)
             if query is None:
-                return
+                return False
             store.transition(session, PilotState.WAKE_DETECTED)
             await websocket.send_json({"type": "wake_detected", "session": public_session(session)})
             if not query:
                 store.transition(session, PilotState.CAPTURING_QUERY)
-                return
+                return False
     if not query:
-        return
-    if wake_ack_task is not None:
-        await wake_ack_task
+        return False
     if session.state != PilotState.CAPTURING_QUERY and session.state != PilotState.WAKE_DETECTED:
-        return
+        return False
     store.transition(session, PilotState.PROCESSING)
     session.current_language = language
     store.save(session)
@@ -139,27 +178,40 @@ async def _handle_final(websocket: WebSocket, db: Session, meeting, user, sessio
                     return execute_pilot_query(
                         query_db, meeting.id, meeting.workspace_id, query_user,
                         query, session.wake_word, trace,
+                        conversation_history=conversation_history,
                     )
 
             if not allow_actions and route_intent(query) == "action_request":
-                result = {"intent": "action_request", "answer": "[Uncertain: Meeting voices are not verified workspace identities. Use your microphone or the task form to create this task.]", "citations": []}
+                result = {"intent": "action_request", "answer": localized_message("unverified_voice", query, "[Uncertain: Meeting voices are not verified workspace identities. Use your microphone or the task form to create this task.]"), "citations": []}
             else:
                 result = await asyncio.to_thread(run_query)
+            result["reply_language"] = reply_language(query, language)
             fresh = store.get(session.session_id, meeting.workspace_id, meeting.id, user.id)
             if fresh is None or fresh.state == PilotState.IDLE:
-                return
+                return False
             session.last_queries = (session.last_queries + [query])[-5:]
+            session.dialogue_speaker = dialogue_speaker
+            session.conversation_history = (
+                list(conversation_history or []) + [{"role": "user", "content": query[:2000]},
+                    {"role": "assistant", "content": str(result.get("answer") or "")[:2000]}]
+            )[-6:]
             session.last_tool_results = (session.last_tool_results + [{"intent": result["intent"]}])[-5:]
             store.save(session)
             await websocket.send_json({"type": "answer", **result})
             if APP_CONFIG.pilot.tts_enabled and result.get("answer"):
+                # Recognition/retrieval already ran while the quick acknowledgement
+                # played. Serialize only speech output to avoid overlapping voices.
+                if wake_ack_task is not None:
+                    await asyncio.gather(wake_ack_task, return_exceptions=True)
                 store.transition(session, PilotState.SPEAKING)
                 await websocket.send_json({"type": "state", "session": public_session(session)})
                 with trace.stage("tts_and_audio_output"):
-                    await _play_text(websocket, meeting, result["answer"], playback_ack, ack_state, language=language)
+                    await _play_text(websocket, meeting, result.get("speech_text", result["answer"]),
+                                     playback_ack, ack_state, language=result["reply_language"])
         if session.state in {PilotState.PROCESSING, PilotState.SPEAKING}:
             store.transition(session, PilotState.LISTENING)
             await websocket.send_json({"type": "state", "session": public_session(session)})
+        return True
     except asyncio.CancelledError:
         raise
     except Exception as exc:
@@ -169,6 +221,8 @@ async def _handle_final(websocket: WebSocket, db: Session, meeting, user, sessio
             store.transition(session, PilotState.ERROR)
         await websocket.send_json({"type": "error", "detail": str(exc)[:200], "session": public_session(session)})
         store.transition(session, PilotState.LISTENING)
+        await websocket.send_json({"type": "state", "session": public_session(session)})
+        return False
 
 
 @router.websocket("/{meeting_id}/pilot/audio")
@@ -194,7 +248,7 @@ async def pilot_audio(websocket: WebSocket, meeting_id: uuid.UUID):
             await websocket.close(code=1008)
             return
         source = hello.get("input_source", "microphone")
-        if source not in {"microphone", "meeting"} or (source == "meeting" and meeting.source != "live"):
+        if source not in {"microphone", "meeting"} or (source == "meeting" and not _live_bot_audio_available(meeting)):
             await websocket.close(code=1008)
             return
         transcriber = MeetingLanguageSTT(get_stt_provider(), getattr(meeting, "transcription_language", None))
@@ -245,6 +299,84 @@ async def pilot_audio(websocket: WebSocket, meeting_id: uuid.UUID):
         wake_gate = WakeGate()
         microphone_turn = 0
         processed_turns = []
+        active_query = ""
+        response_generation = 0
+        pending_turn = None
+        # Reconnecting opens a new listening interaction. Never feed a previous
+        # participant's questions into a newly connected meeting voice source.
+        session.conversation_history = []
+        session.dialogue_speaker = None
+
+        def start_response(event, query):
+            nonlocal active_response, active_query, response_generation
+            if session.state == PilotState.LISTENING:
+                store.transition(session, PilotState.WAKE_DETECTED)
+                store.transition(session, PilotState.CAPTURING_QUERY)
+            if session.state not in {PilotState.CAPTURING_QUERY, PilotState.WAKE_DETECTED}:
+                return
+            response_generation += 1
+            generation = response_generation
+            active_query = _query_key(query)
+            history = _history_for_turn(session, source, event.speaker)
+            speaker_key = "microphone" if source == "microphone" else WakeGate.normalize_speaker(event.speaker)
+            wake_gate.arm_interrupt(event.speaker if source == "meeting" else None)
+            acknowledgement = wake_ack_task
+
+            async def respond():
+                completed = False
+                cancelled = False
+                try:
+                    completed = await _handle_final(
+                        websocket, db, meeting, user, session, store, query, event.language,
+                        playback_ack, ack_state, allow_actions=source != "meeting",
+                        wake_ack_task=acknowledgement, captured_query=True,
+                        conversation_history=history, dialogue_speaker=speaker_key,
+                    )
+                except asyncio.CancelledError:
+                    cancelled = True
+                    raise
+                finally:
+                    completion = {"type": "pilot.response.done", "generation": generation,
+                                  "completed": completed, "speaker": event.speaker}
+                    if cancelled:
+                        # Shutdown/barge-in must not wait on a full transport queue.
+                        try:
+                            incoming.put_nowait(completion)
+                        except asyncio.QueueFull:
+                            pass
+                    else:
+                        await incoming.put(completion)
+            active_response = asyncio.create_task(respond())
+
+        async def interrupt_playback(speaker=None):
+            nonlocal active_response, wake_ack_task, response_generation, active_query, pending_turn
+            ack_state["expected"] = None
+            tasks = []
+            if wake_ack_task and not wake_ack_task.done():
+                wake_ack_task.cancel()
+                tasks.append(wake_ack_task)
+            if session.state == PilotState.SPEAKING:
+                if active_response and not active_response.done():
+                    active_response.cancel()
+                    tasks.append(active_response)
+                response_generation += 1
+                active_response = None
+                active_query = ""
+                pending_turn = None
+                store.transition(session, PilotState.CAPTURING_QUERY)
+            wake_gate.arm_interrupt(speaker or wake_gate.speaker)
+            await websocket.send_json({"type": "pilot_interrupted", "session": public_session(session)})
+            if tasks:
+                await asyncio.gather(*tasks, return_exceptions=True)
+            # Vexa's cancelled speak operation stops and joins its own playback
+            # before releasing the lock. A second late stop could kill the next
+            # response which has just acquired that lock.
+            if meeting.source == "live" and not tasks:
+                try:
+                    await VexaMeetingAudioProvider(meeting.id, meeting.workspace_id).interrupt()
+                except Exception:
+                    logger.exception("Could not stop Pilot audio meeting=%s", meeting.id)
+
         await websocket.send_json({"type": "ready", "format": "pcm_s16le", "sample_rate": APP_CONFIG.pilot.audio_sample_rate,
                                    "channels": 1, "session": public_session(session)})
         while True:
@@ -256,6 +388,23 @@ async def pilot_audio(websocket: WebSocket, meeting_id: uuid.UUID):
             if fresh is None or fresh.state == PilotState.IDLE:
                 await websocket.close(code=1000)
                 break
+            if frame.get("type") == "pilot.response.done":
+                if frame["generation"] != response_generation:
+                    continue
+                active_response = None
+                active_query = ""
+                if not frame["completed"] and session.state in {PilotState.PROCESSING, PilotState.SPEAKING}:
+                    # An upstream playback interruption can cancel speak_text
+                    # without a locally initiated barge-in. Release the state too.
+                    store.transition(session, PilotState.LISTENING)
+                    await websocket.send_json({"type": "state", "session": public_session(session)})
+                if frame["completed"]:
+                    wake_gate.open_followup(frame.get("speaker"), allow_unlabelled=source == "microphone")
+                if pending_turn is not None:
+                    event, query = pending_turn
+                    pending_turn = None
+                    start_response(event, query)
+                continue
             if frame.get("bytes") is not None:
                 if source == "meeting" and "track_id" not in frame:
                     continue
@@ -270,7 +419,8 @@ async def pilot_audio(websocket: WebSocket, meeting_id: uuid.UUID):
                     # The first voiced frame returns a barge-in event before any
                     # partial Whisper transcription is due.
                     events = await asyncio.to_thread(
-                        buffer.feed, frame["bytes"], assistant_speaking=session.state == PilotState.SPEAKING,
+                        buffer.feed, frame["bytes"], assistant_speaking=(session.state == PilotState.SPEAKING
+                            or (wake_ack_task is not None and not wake_ack_task.done())),
                     )
                 except ValueError:
                     await websocket.send_json({"type": "error", "detail": "Invalid PCM16 frame"})
@@ -294,12 +444,15 @@ async def pilot_audio(websocket: WebSocket, meeting_id: uuid.UUID):
                     events = [SpeechEvent(turn.get("type", "partial_transcript"), turn.get("text", ""),
                                           turn.get("language"), turn.get("speaker"), turn.get("confidence"),
                                           turn.get("utterance_id"))]
-                    if session.state == PilotState.SPEAKING:
-                        events.insert(0, SpeechEvent("pilot_interrupted"))
+                    if turn.get("text", "").strip() and (session.state == PilotState.SPEAKING
+                            or (wake_ack_task and not wake_ack_task.done())):
+                        events.insert(0, SpeechEvent("pilot_interrupted", speaker=turn.get("speaker")))
                 elif data.get("type") == "native_interrupted":
                     events = [SpeechEvent("pilot_interrupted")]
-                elif data.get("type") == "playback_complete":
+                elif data.get("type") in {"playback_complete", "playback_failed"}:
                     if data.get("interaction_id") == ack_state["expected"]:
+                        if data["type"] == "playback_failed":
+                            ack_state["error"] = "The browser could not play Pilot audio. Enable audio playback and retry."
                         playback_ack.set()
                     continue
                 else:
@@ -307,12 +460,17 @@ async def pilot_audio(websocket: WebSocket, meeting_id: uuid.UUID):
                         # Membership revocation must close existing sockets too.
                         db.expire_all()
                         get_meeting_for_member(meeting_id, user, db)
-                        if session.state == PilotState.CAPTURING_QUERY and not wake_gate.accepts(wake_gate.speaker):
-                            store.transition(session, PilotState.LISTENING)
+                        if not wake_gate.accepts(wake_gate.speaker) and session.state in {
+                            PilotState.LISTENING, PilotState.CAPTURING_QUERY,
+                        }:
+                            session.conversation_history = []
+                            session.dialogue_speaker = None
+                            if session.state == PilotState.CAPTURING_QUERY:
+                                store.transition(session, PilotState.LISTENING)
+                                await websocket.send_json({"type": "state", "session": public_session(session)})
                             wake_gate.disarm()
-                            await websocket.send_json({"type": "state", "session": public_session(session)})
                         continue
-                    if data.get("type") != "flush" or session.state in {PilotState.SPEAKING, PilotState.PROCESSING}:
+                    if data.get("type") != "flush":
                         continue
                     try:
                         events = await asyncio.to_thread(buffer.flush)
@@ -326,65 +484,65 @@ async def pilot_audio(websocket: WebSocket, meeting_id: uuid.UUID):
             for event in events:
                 if event.type == "speech_started":
                     microphone_turn += 1
+                if event.type == "pilot_interrupted":
+                    if session.state == PilotState.SPEAKING or (wake_ack_task and not wake_ack_task.done()):
+                        await interrupt_playback(event.speaker)
+                    continue
                 if event.type in {"partial_transcript", "final_transcript"}:
-                    if session.state in {PilotState.LISTENING, PilotState.CAPTURING_QUERY, PilotState.PROCESSING} and wake_gate.observe(
+                    speaker = event.speaker if source == "meeting" else None
+                    turn_id = event.utterance_id or (f"mic:{microphone_turn}" if source == "microphone" else None)
+                    if turn_id and turn_id in processed_turns:
+                        continue
+                    previously_armed = wake_gate.accepts(speaker)
+                    conversational_followup = (previously_armed and wake_gate.followup
+                                               and _followup_is_addressed(event.text, source))
+                    woke = wake_gate.observe(
                         event.text, final=event.type == "final_transcript",
-                        utterance_id=event.utterance_id or (f"mic:{microphone_turn}" if source == "microphone" else None),
-                        speaker=event.speaker if source == "meeting" else None, confidence=event.confidence,
-                    ):
-                        if session.state == PilotState.PROCESSING:
-                            if active_response and not active_response.done():
-                                active_response.cancel()
-                                await asyncio.gather(active_response, return_exceptions=True)
-                            store.transition(session, PilotState.LISTENING)
+                        utterance_id=turn_id, speaker=speaker, confidence=event.confidence,
+                    )
+                    if woke:
+                        if not previously_armed:
+                            session.conversation_history = []
+                            session.dialogue_speaker = None
                         if session.state == PilotState.LISTENING:
                             store.transition(session, PilotState.WAKE_DETECTED)
                             store.transition(session, PilotState.CAPTURING_QUERY)
                         await websocket.send_json({"type": "wake_detected", "session": public_session(session)})
-                        wake_ack_task = asyncio.create_task(_acknowledge_wake(websocket, meeting, playback_ack, ack_state))
-                    elif session.state == PilotState.LISTENING:
-                        # Once-only gating must also apply to finalized retransmissions.
-                        await websocket.send_json({"type": event.type, "text": event.text, "language": event.language})
-                        continue
-                    if session.state == PilotState.CAPTURING_QUERY:
-                        if not wake_gate.accepts(event.speaker if source == "meeting" else None):
-                            continue
-                        if event.type == "partial_transcript":
-                            wake_gate.armed_until = wake_gate.clock() + 10.0
-                if event.type == "pilot_interrupted" and session.state == PilotState.SPEAKING:
-                    ack_state["expected"] = None
-                    if active_response and not active_response.done():
-                        active_response.cancel()
-                    store.transition(session, PilotState.CAPTURING_QUERY)
-                    wake_gate.armed_until = wake_gate.clock() + 10.0
-                    wake_gate.speaker = None
-                    await websocket.send_json({"type": "pilot_interrupted", "session": public_session(session)})
-                    if meeting.source == "live":
-                        try:
-                            await VexaMeetingAudioProvider(meeting.id, meeting.workspace_id).interrupt()
-                        except Exception:
-                            logger.exception("Could not stop native Pilot audio meeting=%s", meeting.id)
-                    continue
+                        # A repeat while Qwen is thinking must not cancel the answer
+                        # or start a second overlapping acknowledgement.
+                        if active_response is None and (wake_ack_task is None or wake_ack_task.done()):
+                            wake_ack_task = asyncio.create_task(_acknowledge_wake(websocket, meeting, playback_ack, ack_state))
+                    elif conversational_followup and session.state == PilotState.LISTENING:
+                        store.transition(session, PilotState.WAKE_DETECTED)
+                        store.transition(session, PilotState.CAPTURING_QUERY)
+                        await websocket.send_json({"type": "query_received", "text": event.text,
+                                                   "session": public_session(session)})
+                    addressed = wake_gate.accepts(speaker) and (
+                        not wake_gate.followup or conversational_followup or woke
+                    )
+                    if addressed and event.type == "partial_transcript":
+                        wake_gate.extend_capture()
                 await websocket.send_json({"type": event.type, "text": event.text, "language": event.language,
                                            "speaker": event.speaker, "confidence": event.confidence})
                 if event.type == "final_transcript":
-                    if session.state in {PilotState.PROCESSING, PilotState.SPEAKING, PilotState.IDLE}:
+                    if not addressed or session.state == PilotState.IDLE:
                         continue
-                    if not event.text.strip() or get_wakeword_provider().detect(event.text) == "":
+                    detected = wake_gate.provider.detect(event.text)
+                    query = event.text.strip() if detected is None else detected
+                    if turn_id:
+                        processed_turns = (processed_turns + [turn_id])[-64:]
+                    if not query:
                         continue
                     try:
-                        if active_response and not active_response.done():
-                            if active_response.cancelling():
-                                await asyncio.gather(active_response, return_exceptions=True)
-                            else:
+                        if active_response is not None:
+                            if _query_key(query) == active_query or (pending_turn is not None
+                                    and _query_key(query) == _query_key(pending_turn[1])):
                                 continue
-                        active_response = asyncio.create_task(
-                            _handle_final(websocket, db, meeting, user, session, store,
-                                          event.text, event.language, playback_ack, ack_state, allow_actions=source != "meeting",
-                                          wake_ack_task=wake_ack_task)
-                        )
-                        if event.utterance_id:
-                            processed_turns = (processed_turns + [event.utterance_id])[-64:]
+                            pending_turn = (event, query)
+                            await websocket.send_json({"type": "query_queued", "text": query})
+                            continue
+                        await websocket.send_json({"type": "query_received", "text": query})
+                        start_response(event, query)
                     except Exception:
                         db.rollback()
                         logger.exception("Pilot wake processing failed meeting=%s session=%s", meeting.id, session.session_id)
@@ -403,17 +561,9 @@ async def pilot_audio(websocket: WebSocket, meeting_id: uuid.UUID):
             task.cancel()
         if "pumps" in locals():
             await asyncio.gather(*pumps, return_exceptions=True)
-        stop_native_audio = ("meeting" in locals() and "session" in locals() and meeting.source == "live"
-                             and session.state == PilotState.SPEAKING and "active_response" in locals()
-                             and active_response is not None and not active_response.done())
         if "active_response" in locals() and active_response and not active_response.done():
             active_response.cancel()
             await asyncio.gather(active_response, return_exceptions=True)
-        if stop_native_audio:
-            try:
-                await VexaMeetingAudioProvider(meeting.id, meeting.workspace_id).interrupt()
-            except Exception:
-                pass
         if "session" in locals() and "store" in locals():
             store.stop(session)
         db.close()
